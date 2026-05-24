@@ -1,0 +1,12 @@
+{
+  "item_id": "S2C_34TCT_20260518_0_L2A",
+  "passed": false,
+  "confidence_score": 0.0,
+  "cloud_ratio": 0.8727623059171465,
+  "snow_ratio": 0.0,
+  "water_excluded": true,
+  "issues": [
+    "High cloud cover"
+  ],
+  "radiometry_pass": true
+}
