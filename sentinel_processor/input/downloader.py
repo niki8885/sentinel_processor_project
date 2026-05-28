@@ -102,7 +102,7 @@ def _clip(
         and reference_da.rio.crs is not None
     ):
         clipped = clipped.rio.reproject_match(reference_da)
-    return clipped.squeeze().drop_vars(["band", "spatial_ref"], errors="ignore")
+    return clipped.squeeze().drop_vars(["band"], errors="ignore")
 
 
 def _save_both(da_or_ds: xr.DataArray | xr.Dataset, directory: str, base: str) -> list[str]:
@@ -113,7 +113,25 @@ def _save_both(da_or_ds: xr.DataArray | xr.Dataset, directory: str, base: str) -
     written.append(tif_path)
     nc_path = os.path.join(directory, base + ".nc")
     try:
-        da_or_ds.to_netcdf(nc_path)
+        nc_obj = da_or_ds
+        try:
+            crs = (
+                da_or_ds.rio.crs
+                if isinstance(da_or_ds, xr.DataArray)
+                else next(iter(da_or_ds.data_vars.values())).rio.crs
+            )
+            if crs is not None:
+                if isinstance(nc_obj, xr.DataArray):
+                    nc_obj = nc_obj.rio.write_crs(crs, grid_mapping_name="spatial_ref")
+                else:
+                    first_var = next(iter(nc_obj.data_vars))
+                    nc_obj = nc_obj.copy()
+                    nc_obj[first_var] = nc_obj[first_var].rio.write_crs(
+                        crs, grid_mapping_name="spatial_ref"
+                    )
+        except Exception as crs_exc:
+            logger.debug(f"[sentinel] CRS encoding skipped for {nc_path}: {crs_exc}")
+        nc_obj.to_netcdf(nc_path)
         written.append(nc_path)
     except ValueError as exc:
         if "backend" in str(exc).lower() or "netcdf" in str(exc).lower():

@@ -3,6 +3,7 @@
 venv/
 env/
 downloads/
+data/
 
 __pycache__/
 *.py[cod]
@@ -11,7 +12,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .coverage
-htmlcov/
 
 .env
 .env.local
