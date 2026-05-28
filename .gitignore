@@ -2,7 +2,7 @@
 .idea/
 venv/
 env/
-donwloads/
+downloads/
 
 __pycache__/
 *.py[cod]
