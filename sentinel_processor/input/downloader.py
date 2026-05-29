@@ -9,6 +9,7 @@ from typing import Sequence, Union
 import numpy as np
 import rioxarray
 import xarray as xr
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pystac_client import Client
 
 from sentinel_processor.config import (
@@ -55,6 +56,8 @@ class DownloadConfig:
     end_date: datetime.datetime | None = None
     lookback_days: int = DEFAULT_LOOKBACK_DAYS
     validate: bool = True
+    band_workers: int = 4
+    scene_workers: int = 2
     max_cloud_threshold: float = MAX_CLOUD_THRESHOLD
     min_confidence: float = MIN_CONFIDENCE_TO_SAVE
     save_report: bool = SAVE_VALIDATION_REPORT
@@ -180,6 +183,17 @@ def _run_validation(
     return passes, report
 
 
+def _fetch_band(
+    key: str,
+    href: str,
+    lon: float,
+    lat: float,
+    half: float,
+) -> tuple[str, xr.DataArray]:
+    da = rioxarray.open_rasterio(href)
+    return key, _clip(da, lon, lat, half)
+
+
 def _download_item(
     item,
     lon: float,
@@ -189,31 +203,41 @@ def _download_item(
 ) -> list[str]:
     half = cfg.bbox_half_deg
     written: list[str] = []
-    arrays: list[xr.DataArray] = []
-    ok_keys: list[str] = []
-    reference_da = None
 
+
+    band_tasks: dict[str, str] = {}
     for key in cfg.band_keys():
         asset = item.assets.get(key)
-        if not asset:
+        if asset:
+            band_tasks[key] = asset.href
+        else:
             logger.warning(f"[sentinel] Missing band '{key}' in {item.id}")
-            continue
-        try:
-            da = rioxarray.open_rasterio(asset.href)
-            clipped = _clip(da, lon, lat, half)
-            if reference_da is None:
-                reference_da = clipped
-            arrays.append(clipped)
-            ok_keys.append(key)
-        except Exception as exc:
-            logger.warning(f"[sentinel] Band '{key}' failed: {exc}")
+
+    band_results: dict[str, xr.DataArray] = {}
+    with ThreadPoolExecutor(max_workers=cfg.band_workers) as pool:
+        futures = {
+            pool.submit(_fetch_band, key, href, lon, lat, half): key
+            for key, href in band_tasks.items()
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                _, clipped = future.result()
+                band_results[key] = clipped
+            except Exception as exc:
+                logger.warning(f"[sentinel] Band '{key}' failed: {exc}")
+
+    ok_keys = [k for k in cfg.band_keys() if k in band_results]
+    arrays = [band_results[k] for k in ok_keys]
 
     if not arrays:
         logger.warning(f"[sentinel] No spectral bands for {base_name} — item skipped.")
         return []
 
-    if reference_da is not None and reference_da.rio.crs is not None:
-        aligned = []
+    reference_da = arrays[0]
+
+    if reference_da.rio.crs is not None:
+        aligned: list[xr.DataArray] = []
         for da in arrays:
             if da is reference_da:
                 aligned.append(da)
@@ -230,8 +254,9 @@ def _download_item(
         arrays = aligned
 
     ds = xr.concat(arrays, dim="band").assign_coords(band=ok_keys)
-    if reference_da is not None and reference_da.rio.crs:
+    if reference_da.rio.crs:
         ds = ds.rio.set_spatial_dims(x_dim="x", y_dim="y").rio.write_crs(reference_da.rio.crs)
+
 
     report: dict = {"item_id": item.id, "passed": True}
     if cfg.validate:
@@ -251,28 +276,46 @@ def _download_item(
     if cfg.save_report:
         _write_report(report, cfg.subdir("spectral"), base_name)
 
-    for key in cfg.tech_keys():
-        asset = item.assets.get(key)
-        if not asset:
-            continue
-        try:
-            da = rioxarray.open_rasterio(asset.href)
-            layer = _clip(da, lon, lat, half, reference_da)
-            written.extend(_save_both(layer, cfg.subdir("technical"), f"{key}_{base_name}"))
-        except Exception as exc:
-            logger.warning(f"[sentinel] Layer '{key}' failed: {exc}")
+    def _fetch_tech(key: str, href: str) -> tuple[str, list[str]]:
+        da = rioxarray.open_rasterio(href)
+        layer = _clip(da, lon, lat, half, reference_da)
+        paths = _save_both(layer, cfg.subdir("technical"), f"{key}_{base_name}")
+        return key, paths
+
+    tech_tasks = {
+        key: item.assets[key].href
+        for key in cfg.tech_keys()
+        if key in item.assets
+    }
+    with ThreadPoolExecutor(max_workers=cfg.band_workers) as pool:
+        futures_tech = {pool.submit(_fetch_tech, k, h): k for k, h in tech_tasks.items()}
+        for future in as_completed(futures_tech):
+            key = futures_tech[future]
+            try:
+                _, paths = future.result()
+                written.extend(paths)
+            except Exception as exc:
+                logger.warning(f"[sentinel] Layer '{key}' failed: {exc}")
 
     if cfg.visual:
-        for vis_key in list(VisualAssets.VISUAL):
-            asset = item.assets.get(vis_key)
-            if not asset:
-                continue
-            try:
-                da = rioxarray.open_rasterio(asset.href)
-                vis = _clip(da, lon, lat, half)
-                written.extend(_save_both(vis, cfg.subdir("visual"), f"vis_{base_name}"))
-            except Exception as exc:
-                logger.warning(f"[sentinel] Visual failed: {exc}")
+        def _fetch_visual(vis_key: str, href: str) -> list[str]:
+            da = rioxarray.open_rasterio(href)
+            vis = _clip(da, lon, lat, half)
+            return _save_both(vis, cfg.subdir("visual"), f"vis_{base_name}")
+
+        vis_tasks = {
+            vis_key: item.assets[vis_key].href
+            for vis_key in list(VisualAssets.VISUAL)
+            if vis_key in item.assets
+        }
+        with ThreadPoolExecutor(max_workers=cfg.band_workers) as pool:
+            futures_vis = {pool.submit(_fetch_visual, k, h): k for k, h in vis_tasks.items()}
+            for future in as_completed(futures_vis):
+                vis_key = futures_vis[future]
+                try:
+                    written.extend(future.result())
+                except Exception as exc:
+                    logger.warning(f"[sentinel] Visual failed: {exc}")
 
     return written
 
@@ -326,17 +369,31 @@ def download_sentinel2(
 
     _progress_start(total, progress)
 
-    for idx, (item, loc) in enumerate(all_items, 1):
+    scene_tasks: list[tuple[object, LocationSpec, str]] = []
+    for item, loc in all_items:
         timestamp = item.datetime or datetime.datetime.min.replace(tzinfo=datetime.UTC)
-        if loc.name:
-            base_name = f"{loc.name}_{timestamp.strftime('%Y%m%dT%H%M%S')}"
-        else:
-            base_name = loc.base_name(timestamp)
+        base_name = (
+            f"{loc.name}_{timestamp.strftime('%Y%m%dT%H%M%S')}"
+            if loc.name
+            else loc.base_name(timestamp)
+        )
+        scene_tasks.append((item, loc, base_name))
 
-        _progress_update(idx, total, base_name, progress)
+    completed_count = 0
+    lock = __import__("threading").Lock()
 
+    def _process_scene(args: tuple) -> tuple[str, list[str]]:
+        nonlocal completed_count
+        item, loc, base_name = args
         written = _download_item(item, loc.lon, loc.lat, base_name, cfg)
-        results.setdefault(base_name, []).extend(written)
+        with lock:
+            completed_count += 1
+            _progress_update(completed_count, total, base_name, progress)
+        return base_name, written
+
+    with ThreadPoolExecutor(max_workers=cfg.scene_workers) as pool:
+        for base_name, written in pool.map(_process_scene, scene_tasks):
+            results.setdefault(base_name, []).extend(written)
 
     _progress_done(total, results, progress)
     return results
