@@ -53,6 +53,15 @@ def _get_lib() -> ctypes.CDLL:
         ctypes.c_int,
         ctypes.POINTER(ctypes.c_int),
     ]
+    _lib.check_dimensions.restype = None
+    _lib.check_dimensions.argtypes = [
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int),
+    ]
     return _lib
 
 
@@ -109,6 +118,31 @@ def call_check_radiometry(pixels) -> bool:
     result = ctypes.c_int(0)
     lib.check_radiometry(c_arr, ctypes.c_int(n), ctypes.byref(result))
     return bool(result.value)
+
+
+def call_check_dimensions(rows: int, cols: int) -> dict:
+    lib = _get_lib()
+    result = ctypes.c_int(0)
+    n_issues = ctypes.c_int(0)
+    issues_buf = ctypes.create_string_buffer(_MAX_ISSUE_LEN * _MAX_ISSUES)
+    lib.check_dimensions(
+        ctypes.c_int(rows),
+        ctypes.c_int(cols),
+        ctypes.byref(result),
+        issues_buf,
+        ctypes.c_int(_MAX_ISSUE_LEN),
+        ctypes.byref(n_issues),
+    )
+    issues = []
+    for i in range(n_issues.value):
+        chunk = issues_buf.raw[i * _MAX_ISSUE_LEN: (i + 1) * _MAX_ISSUE_LEN]
+        text = chunk.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+        if text:
+            issues.append(text)
+    return {
+        "passed": bool(result.value),
+        "issues": issues,
+    }
 
 
 def validate_file(

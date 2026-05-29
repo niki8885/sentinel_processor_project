@@ -4,7 +4,7 @@ import sentinel_processor as sp
 cfg = sp.DownloadConfig(
     bands               = sp.SpectralBands.ALL,
     tech_bands          = sp.TechnicalLayers.SCL,
-    visual              = False,
+    visual              = True,
     keep_items          = 5,
     max_cloud_threshold = 0.15,
     min_confidence      = 0.75,

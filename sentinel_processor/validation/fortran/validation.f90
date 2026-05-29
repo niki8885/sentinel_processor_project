@@ -2,7 +2,53 @@ module validation_mod
   use iso_c_binding
   implicit none
 
+
+  integer,        parameter :: MIN_SIDE        = 32
+  integer,        parameter :: MAX_SIDE        = 10980
+  real(c_double), parameter :: MAX_ASPECT_RATIO = 4.0d0
+
 contains
+
+  subroutine check_dimensions(rows, cols, result, &
+      issues_buf, max_issue_len, n_issues) &
+    bind(C, name="check_dimensions")
+
+    integer(c_int), intent(in),  value :: rows, cols, max_issue_len
+    integer(c_int), intent(out) :: result, n_issues
+    character(c_char), intent(out) :: issues_buf(max_issue_len * 4)
+
+    integer        :: mn, mx
+    real(c_double) :: ratio
+
+    n_issues = 0
+    call zero_buf(issues_buf, max_issue_len * 4)
+    result = 1
+
+    if (rows < MIN_SIDE .or. cols < MIN_SIDE) then
+      call write_issue(issues_buf, n_issues, max_issue_len, &
+        "Scene too small: side below minimum threshold")
+      result = 0
+    end if
+
+    if (rows > MAX_SIDE .or. cols > MAX_SIDE) then
+      call write_issue(issues_buf, n_issues, max_issue_len, &
+        "Scene too large: side exceeds maximum threshold")
+      result = 0
+    end if
+
+    mn = min(rows, cols)
+    mx = max(rows, cols)
+    if (mn > 0) then
+      ratio = real(mx, c_double) / real(mn, c_double)
+      if (ratio > MAX_ASPECT_RATIO) then
+        call write_issue(issues_buf, n_issues, max_issue_len, &
+          "Degenerate shape: aspect ratio exceeds limit")
+        result = 0
+      end if
+    end if
+
+  end subroutine check_dimensions
+
 
   subroutine validate_scl(scl_values, n, max_cloud_thr, &
       confidence_score, cloud_ratio, snow_ratio, water_excluded, &

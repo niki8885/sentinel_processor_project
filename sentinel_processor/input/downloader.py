@@ -23,7 +23,7 @@ from sentinel_processor.config import (
     SAVE_VALIDATION_REPORT,
     STAC_API_URL,
 )
-from sentinel_processor.validation._fortran_bridge import call_check_radiometry, call_validate_scl
+from sentinel_processor.validation._fortran_bridge import call_check_radiometry, call_check_dimensions, call_validate_scl
 from sentinel_processor.utils.data_utils import LocationSpec, SpectralBands, TechnicalLayers, VisualAssets, _BandGroup
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,23 @@ def _run_validation(
         report["error"] = str(exc)
         report["passed"] = True
         return True, report
+
+    # --- dimension check (rejects degenerate shapes like 15×1152) ---
+    clipped_shape = clipped.values.shape
+    rows = clipped_shape[-2] if clipped.values.ndim >= 2 else 1
+    cols = clipped_shape[-1] if clipped.values.ndim >= 1 else 1
+    dim_result = call_check_dimensions(rows, cols)
+    report["rows"] = rows
+    report["cols"] = cols
+    report["dimension_pass"] = dim_result["passed"]
+    if not dim_result["passed"]:
+        report["issues"] = dim_result["issues"]
+        report["passed"] = False
+        logger.info(
+            f"[validation] {item.id} rejected by dimension check "
+            f"({rows}×{cols}): {dim_result['issues']}"
+        )
+        return False, report
     scl_result = call_validate_scl(scl_arr, cfg.max_cloud_threshold)
     report.update(scl_result)
     radio_pass = True
@@ -262,10 +279,14 @@ def _download_item(
     if cfg.validate:
         passes, report = _run_validation(item, lon, lat, half, reference_da, cfg)
         if not passes:
+            _conf = report.get("confidence_score")
+            _cloud = report.get("cloud_ratio")
+            _conf_s  = f"{_conf:.2f}"  if isinstance(_conf,  float) else "?"
+            _cloud_s = f"{_cloud:.2f}" if isinstance(_cloud, float) else "?"
             logger.info(
                 f"[validation] {base_name} rejected "
-                f"(confidence={report.get('confidence_score', '?'):.2f}, "
-                f"cloud={report.get('cloud_ratio', '?'):.2f}, "
+                f"(confidence={_conf_s}, cloud={_cloud_s}, "
+                f"rows={report.get('rows', '?')}, cols={report.get('cols', '?')}, "
                 f"issues={report.get('issues', [])})"
             )
             if cfg.save_report:
