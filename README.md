@@ -1,7 +1,7 @@
 # sentinel-processor
 
 Sentinel-2 L2A downloader built on the [Element84 STAC API](https://earth-search.aws.element84.com/v1).  
-Downloads spectral bands, quality layers, and visual overviews for any coordinate, with cloud/radiometry validation backed by a compiled Fortran library.
+Downloads spectral bands, quality layers, and visual overviews for any coordinate, with cloud/radiometry validation backed by a compiled Fortran library, spectral index computation, and interactive Plotly visualisation.
 
 ---
 
@@ -23,24 +23,36 @@ Full optional extras:
 pip install "sentinel-processor[all]"   # netcdf + shapely + geoalchemy2
 ```
 
-### Fortran validation library
+### Fortran libraries
 
-The quality validation step requires a compiled shared library.  
-Pre-built binaries are not yet distributed — build from source:
+Two Fortran kernels must be compiled before validation and index computation are available.  
+Without them, set `validate=False` and avoid calling `compute_indices` — everything else works normally.
 
 **Linux / Mac**
 ```bash
-cd sentinel_processor/validation/fortran
-gfortran -O2 -shared -fPIC -o libsentinel_validation.so validation.f90
+# validation
+gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/validation/fortran/libsentinel_validation.so \
+  sentinel_processor/validation/fortran/validation.f90
+
+# indices
+gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/indices/fortran/libsentinel_indices.so \
+  sentinel_processor/indices/fortran/indices_mod.f90
 ```
 
-**Windows** (requires [MSYS2](https://www.msys2.org/) with `mingw-w64-ucrt-x86_64-gcc-fortran`)
-```bat
-cd sentinel_processor\validation\fortran
-gfortran -O2 -shared -o libsentinel_validation.dll validation.f90
-```
+**Windows** (MSYS2 UCRT64 terminal, requires `mingw-w64-ucrt-x86_64-gcc-fortran`)
+```bash
+# validation
+gfortran -O2 -shared -static-libgfortran -static-libgcc \
+  -o sentinel_processor/validation/fortran/libsentinel_validation.dll \
+  sentinel_processor/validation/fortran/validation.f90
 
-If the library is not built, `validate=False` bypasses validation and everything else works normally.
+# indices
+gfortran -O2 -shared -fPIC -static-libgfortran -static-libgcc \
+  -o sentinel_processor/indices/fortran/libsentinel_indices.dll \
+  sentinel_processor/indices/fortran/indices_mod.f90
+```
 
 ---
 
@@ -48,12 +60,42 @@ If the library is not built, `validate=False` bypasses validation and everything
 
 ```python
 import sentinel_processor as sp
+from sentinel_processor.indices.compute import compute_indices
+from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask
 
+# 1. Download
 results = sp.download_sentinel2(
-    [sp.LocationSpec(lat=47.562938, lon=19.169805, name="budapest")],
+    [sp.LocationSpec(lat=47.56, lon=19.17, name="budapest")],
 )
-# results["budapest_20260501T103000"] → ["downloads/spectral/budapest_20260501T103000.tif", ...]
+
+scene = "data/spectral/budapest_20260526T095725.nc"
+vis   = "data/visual/vis_budapest_20260526T095725.nc"
+scl   = "data/technical/scl_budapest_20260526T095725.nc"
+
+# 2. Compute indices
+idx = compute_indices(scene, ["ndvi", "ndwi", "ndbi"])
+
+# 3. Visualise
+plot_rgb(vis).show()
+plot_band(idx["ndvi"], colorscale="RdYlGn").show()
+plot_mask(scl).show()
+plot_grid([
+    {"file": scene,        "band": "nir",  "label": "NIR"},
+    {"file": idx["ndvi"],                  "label": "NDVI", "colorscale": "RdYlGn"},
+    {"file": idx["ndwi"],                  "label": "NDWI", "colorscale": "Blues"},
+], ncols=3).show()
 ```
+
+---
+
+## Modules
+
+| Module | Description | Docs |
+|---|---|---|
+| `sentinel_processor` | Download, STAC search, validation | [DOWNLOADER.md](docs/DOWNLOADER.md) |
+| `sentinel_processor.indices` | Spectral index computation (Fortran kernel) | [INDICES.md](docs/INDICES.md) |
+| `sentinel_processor.validation` | SCL + radiometry quality checks (Fortran) | [VALIDATION.md](docs/VALIDATION.md) |
+| `sentinel_processor.visualisation` | Interactive Plotly figures | [VISUALISATION.md](docs/VISUALISATION.md) |
 
 ---
 
@@ -69,7 +111,8 @@ results = sp.download_sentinel2(
 )
 ```
 
-Downloads the 5 most recent cloud-free Sentinel-2 scenes within 5 km of the point, saves to `data/spectral/`, `data/technical/`, `data/visual/`.
+Downloads the 10 most recent cloud-free Sentinel-2 scenes within 5 km of the point.  
+Saves to `data/spectral/`, `data/technical/`, `data/visual/`.
 
 ### Custom config
 
@@ -78,18 +121,15 @@ import datetime
 import sentinel_processor as sp
 
 cfg = sp.DownloadConfig(
-    bands               = sp.SpectralBands.VEGETATION,  # red, NIR, rededge 1-2-3
-    tech_bands          = sp.TechnicalLayers.SCL,       # SCL only
+    bands               = sp.SpectralBands.VEGETATION,
+    tech_bands          = sp.TechnicalLayers.SCL,
     visual              = False,
     output_dir          = "/mnt/sentinel",
-    bbox_half_deg       = 0.045,                        # ~5 km
     start_date          = datetime.datetime(2025, 3, 1, tzinfo=datetime.UTC),
     end_date            = datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC),
     keep_items          = 3,
-    validate            = True,
     max_cloud_threshold = 0.15,
     min_confidence      = 0.75,
-    save_report         = True,
 )
 
 results = sp.download_sentinel2(
@@ -101,38 +141,50 @@ results = sp.download_sentinel2(
 )
 ```
 
+### Compute spectral indices
+
+```python
+from sentinel_processor.indices.compute import compute_indices
+
+results = compute_indices(
+    source="data/spectral/budapest_20260526T095725.nc",
+    indices=["ndvi", "evi", "ndwi", "ndbi", "nbr"],
+    output_dir="data/indices",
+)
+# {"ndvi": "data/indices/indices_budapest_..._ndvi.tif", ...}
+```
+
+Supported indices: `ndvi`, `evi`, `savi`, `ndwi`, `mndwi`, `ndbi`, `nbr`, `ndsi`, `cig`, `arvi`.
+
+### Visualise
+
+```python
+from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask
+
+plot_band("data/spectral/scene.nc", band="nir", colorscale="Plasma").show()
+plot_rgb("data/visual/vis_scene.nc").show()
+plot_rgb("data/spectral/scene.nc", "nir", "red", "green").show()   # false colour
+plot_mask("data/technical/scl_scene.nc", bad_classes=[8, 9, 10]).show()
+plot_grid([
+    {"file": "data/spectral/scene.nc", "band": "red",   "label": "Red"},
+    {"file": "data/spectral/scene.nc", "band": "nir",   "label": "NIR"},
+    {"file": "data/indices/indices_scene_ndvi.tif",     "label": "NDVI", "colorscale": "RdYlGn"},
+], ncols=3).show()
+```
+
 ### Validate an existing SCL file
 
 ```python
 from sentinel_processor import validate_file
 
 report = validate_file(
-    "downloads/technical/scl_budapest_20260501T103000.tif",
-    max_cloud_threshold = 0.30,
-    min_confidence      = 0.50,
+    "data/technical/scl_budapest_20260526T095725.tif",
+    max_cloud_threshold=0.30,
+    min_confidence=0.50,
 )
-print(report["passed"])        # True
-print(report["cloud_ratio"])   # 0.04
-print(report["issues"])        # []
-```
-
-### Low-level validation calls
-
-```python
-import rioxarray
-from sentinel_processor import call_validate_scl, call_check_radiometry
-
-da = rioxarray.open_rasterio("scl.tif")
-pixels = da.values.flatten().astype(int).tolist()
-
-result = call_validate_scl(pixels, max_cloud_threshold=0.30)
-radio  = call_check_radiometry(da.values.flatten().astype(float))
-```
-
-### Suppress progress bar
-
-```python
-results = sp.download_sentinel2(locations, cfg=cfg, progress=False)
+print(report["passed"])           # True
+print(report["cloud_ratio"])      # 0.04
+print(report["confidence_score"]) # 1.0
 ```
 
 ---
@@ -143,8 +195,10 @@ results = sp.download_sentinel2(locations, cfg=cfg, progress=False)
 <output_dir>/
 ├── spectral/
 │   ├── <name>_<timestamp>.tif
-│   ├── <name>_<timestamp>.nc       ← requires sentinel-processor[netcdf]
-│   └── <name>_<timestamp>_report.json
+│   ├── <name>_<timestamp>.nc
+│   ├── <name>_<timestamp>_report.json
+│   └── indices/
+│       └── indices_<name>_<timestamp>_<index>.tif
 ├── technical/
 │   ├── scl_<name>_<timestamp>.tif/.nc
 │   ├── aot_<name>_<timestamp>.tif/.nc
@@ -152,8 +206,6 @@ results = sp.download_sentinel2(locations, cfg=cfg, progress=False)
 └── visual/
     └── vis_<name>_<timestamp>.tif/.nc
 ```
-
-File naming: `<name>_<YYYYMMDDTHHMMSS>` when `name` is set, otherwise `<YYYY-MM-DD>_<lat>_<lon>`.
 
 ---
 
@@ -171,46 +223,23 @@ File naming: `<name>_<YYYYMMDDTHHMMSS>` when `name` is set, otherwise `<YYYY-MM-
 | `TechnicalLayers.SCL` | Scene Classification Layer |
 | `TechnicalLayers.ALL` | SCL + AOT + WVP |
 
-Custom band lists are also accepted:
-```python
-cfg = sp.DownloadConfig(bands=["red", "nir", "swir16"])
-```
-
----
-
-## DownloadConfig reference
-
-| Parameter | Default | Description |
-|---|---|---|
-| `bands` | `SpectralBands.ALL` | Spectral bands |
-| `tech_bands` | `TechnicalLayers.ALL` | Quality layers; `None` to disable |
-| `visual` | `True` | RGB visual overview |
-| `output_dir` | `"data"` | Root output directory |
-| `bbox_half_deg` | `0.05` | Bounding-box half-size in degrees |
-| `max_items` | `50` | Max STAC items per search |
-| `keep_items` | `10` | Most-recent items to process |
-| `lookback_days` | `30` | Default search window when `start_date` is None |
-| `validate` | `True` | Run Fortran quality checks |
-| `max_cloud_threshold` | `0.30` | Max allowed cloud fraction |
-| `min_confidence` | `0.01` | Min confidence score to save |
-| `save_report` | `True` | Write JSON report per scene |
+Custom band list: `DownloadConfig(bands=["red", "nir", "swir16"])`
 
 ---
 
 ## Requirements
 
 - Python ≥ 3.10
-- `pystac-client`, `rioxarray`, `xarray`, `numpy`, `rasterio`
+- `pystac-client`, `rioxarray`, `xarray`, `numpy`, `rasterio`, `plotly`
 - `netCDF4` or `h5netcdf` for `.nc` output (optional)
-- `gfortran` ≥ 9 to build the Fortran validation library
+- `gfortran` ≥ 9 to build the Fortran validation and indices libraries
 
 ---
 
 ## Development
 
 ```bash
-git clone https://github.com/your-org/sentinel-processor
+git clone https://github.com/niki8885/sentinel-processor
 cd sentinel-processor
 pip install -e ".[dev]"
-python run_test.py
 ```
