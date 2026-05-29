@@ -1,6 +1,6 @@
 # Visualisation
 
-Interactive Plotly figures for Sentinel-2 scenes, indices, and quality layers.  
+Interactive Plotly figures for Sentinel-2 scenes, indices, and quality layers.
 All functions return a `plotly.graph_objects.Figure` and optionally save a self-contained HTML file.
 
 ## Install
@@ -23,13 +23,13 @@ from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid
 sentinel_processor/
 └── visualisation/
     ├── __init__.py
-    └── plot.py      ← public API
+    └── plot.py
 ```
 
 ## Output
 
-All functions return a `plotly.graph_objects.Figure`.  
-Pass `save_html="path/to/file.html"` to write a self-contained interactive HTML file.  
+All functions return a `plotly.graph_objects.Figure`.
+Pass `save_html="path/to/file.html"` to write a self-contained interactive HTML file.
 Call `.show()` to open in the browser, or use `.to_html()` / `.write_image()` for further export.
 
 ## API reference
@@ -51,12 +51,10 @@ Visualise a single band or index as an interactive heatmap.
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `source` | `str \| Path` | — | Path to `.nc` or `.tif` |
-| `band` | `str \| int \| None` | `None` | Band name (`"nir"`, `"red"`, …), integer index, or `None` to squeeze (for single-band files) |
+| `band` | `str \| int \| None` | `None` | Band name (`"nir"`, `"red"`, …), integer index, or `None` to squeeze (single-band files) |
 | `colorscale` | `str` | `"Viridis"` | Any Plotly colorscale: `"RdYlGn"`, `"Greys"`, `"Plasma"`, … |
 | `title` | `str \| None` | auto | Figure title |
 | `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
-
----
 
 ### plot_rgb
 
@@ -75,10 +73,10 @@ RGB preview with automatic percentile stretch (2–98%).
 
 Two modes — determined by whether band arguments are passed:
 
-**Mode A — visual file** (pre-made 3-band overview from the downloader):  
+**Mode A — visual file** (pre-made 3-band overview from the downloader):
 Pass only `source`. Bands are taken in order: index 0 = R, 1 = G, 2 = B.
 
-**Mode B — raw spectral** (build RGB from any three bands):  
+**Mode B — raw spectral** (build RGB from any three bands):
 Pass `source` + explicit band names. Supports true colour and any false-colour combination.
 
 | Parameter | Type | Default | Description |
@@ -89,8 +87,6 @@ Pass `source` + explicit band names. Supports true colour and any false-colour c
 | `blue_band` | `str \| int \| None` | `None` | Blue channel selector (mode B) |
 | `title` | `str \| None` | auto | Figure title |
 | `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
-
----
 
 ### plot_grid
 
@@ -125,8 +121,6 @@ Each panel is a `dict` with these keys:
 
 Files are cached in memory — referencing the same file multiple times with different bands does not re-open it.
 
----
-
 ### plot_mask
 
 ```python
@@ -140,6 +134,7 @@ def plot_mask(
 ```
 
 Binary cloud / artefact mask from an SCL layer. Produces three panels:
+
 - **Binary heatmap** — green = clear, red = bad
 - **Pie chart** — clear % vs bad %
 - **SCL class breakdown** — horizontal bar chart for classes present in the file; bad classes highlighted in red
@@ -147,10 +142,10 @@ Binary cloud / artefact mask from an SCL layer. Produces three panels:
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `scl_source` | `str \| Path` | — | Path to SCL `.nc` or `.tif` |
-| `bad_classes` | `Sequence[int] \| None` | `{0,1,3,8,9,10}` | SCL values treated as bad; see class table below |
+| `bad_classes` | `Sequence[int] \| None` | `{0,1,3,8,9,10}` | SCL values treated as bad |
 | `title` | `str \| None` | auto | Figure title |
 | `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
-| `return_mask` | `bool` | `False` | If `True`, also returns `np.ndarray` (1=bad, 0=clear) |
+| `return_mask` | `bool` | `False` | If `True`, also returns `np.ndarray` (1 = bad, 0 = clear) |
 
 ## SCL class reference
 
@@ -218,26 +213,29 @@ plot_rgb(
 ```python
 from sentinel_processor.visualisation.plot import plot_grid
 
-# all 10 spectral bands
 scene = "data/spectral/budapest_20260526T095725.nc"
+
+# all 10 spectral bands
 plot_grid(
     [
         {"file": scene, "band": b, "label": b}
-        for b in ["blue","green","red","nir","rededge1","rededge2","rededge3","nir08","swir16","swir22"]
+        for b in ["blue", "green", "red", "nir",
+                  "rededge1", "rededge2", "rededge3",
+                  "nir08", "swir16", "swir22"]
     ],
     ncols=5,
     save_html="data/vis/all_bands.html",
 ).show()
 
-# visual RGB channels + NDVI + NDWI
+# visual channels + indices
 plot_grid(
     [
         {"file": "data/visual/vis_budapest_20260526T095725.nc", "band": 0, "label": "Red"},
         {"file": "data/visual/vis_budapest_20260526T095725.nc", "band": 1, "label": "Green"},
         {"file": "data/visual/vis_budapest_20260526T095725.nc", "band": 2, "label": "Blue"},
-        {"file": "data/indices/indices_budapest_20260526T095725_ndvi.tif", "label": "NDVI",  "colorscale": "RdYlGn"},
-        {"file": "data/indices/indices_budapest_20260526T095725_ndwi.tif", "label": "NDWI",  "colorscale": "Blues"},
-        {"file": "data/indices/indices_budapest_20260526T095725_ndbi.tif", "label": "NDBI",  "colorscale": "Reds"},
+        {"file": "data/indices/indices_budapest_20260526T095725_ndvi.tif", "label": "NDVI", "colorscale": "RdYlGn"},
+        {"file": "data/indices/indices_budapest_20260526T095725_ndwi.tif", "label": "NDWI", "colorscale": "Blues"},
+        {"file": "data/indices/indices_budapest_20260526T095725_ndbi.tif", "label": "NDBI", "colorscale": "Reds"},
     ],
     ncols=3,
     save_html="data/vis/grid.html",
@@ -252,14 +250,14 @@ from sentinel_processor.visualisation.plot import plot_mask
 # default bad classes (clouds, shadows, no-data)
 plot_mask("data/technical/scl_budapest_20260526T095725.nc").show()
 
-# only flag high/medium cloud and cirrus
+# only flag cloud and cirrus
 plot_mask(
     "data/technical/scl_budapest_20260526T095725.nc",
     bad_classes=[8, 9, 10],
     save_html="data/vis/cloud_mask.html",
 ).show()
 
-# get the numpy mask array for further processing
+# also get the numpy mask array
 fig, mask_arr = plot_mask(
     "data/technical/scl_budapest_20260526T095725.nc",
     return_mask=True,
@@ -280,9 +278,9 @@ results = sp.download_sentinel2(
     cfg=sp.DownloadConfig(bands=sp.SpectralBands.ALL, keep_items=1),
 )
 
-scene   = "data/spectral/budapest_20260526T095725.nc"
-vis     = "data/visual/vis_budapest_20260526T095725.nc"
-scl     = "data/technical/scl_budapest_20260526T095725.nc"
+scene = "data/spectral/budapest_20260526T095725.nc"
+vis   = "data/visual/vis_budapest_20260526T095725.nc"
+scl   = "data/technical/scl_budapest_20260526T095725.nc"
 
 # 2. compute indices
 idx_paths = compute_indices(scene, ["ndvi", "ndwi", "ndbi"])
@@ -294,11 +292,12 @@ plot_band(idx_paths["ndvi"], colorscale="RdYlGn", save_html="data/vis/ndvi.html"
 plot_mask(scl, save_html="data/vis/mask.html").show()
 plot_grid(
     [
-        {"file": scene, "band": "red",  "label": "Red"},
-        {"file": scene, "band": "nir",  "label": "NIR"},
-        {"file": idx_paths["ndvi"],     "label": "NDVI", "colorscale": "RdYlGn"},
-        {"file": idx_paths["ndwi"],     "label": "NDWI", "colorscale": "Blues"},
+        {"file": scene,               "band": "red", "label": "Red"},
+        {"file": scene,               "band": "nir", "label": "NIR"},
+        {"file": idx_paths["ndvi"],                  "label": "NDVI", "colorscale": "RdYlGn"},
+        {"file": idx_paths["ndwi"],                  "label": "NDWI", "colorscale": "Blues"},
     ],
-    ncols=4, save_html="data/vis/summary.html",
+    ncols=4,
+    save_html="data/vis/summary.html",
 ).show()
 ```
