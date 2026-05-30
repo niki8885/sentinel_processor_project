@@ -33,13 +33,18 @@ sentinel_processor/
 ├── utils/
 │   └── data_utils.py
 ├── processing/
-│   ├── _fortran_bridge.py
+│   ├── _fortran_bridge.py       ← pansharpening bridge
+│   ├── _raster_ops_bridge.py    ← raster ops bridge
 │   └── fortran/
-│       └── pansharpening.f90
+│       ├── pansharpening.f90
+│       ├── raster_ops.f90
+│       ├── libsentinel_processing.dll / .so
+│       └── libsentinel_raster_ops.dll / .so
 └── validation/
     ├── _fortran_bridge.py
     └── fortran/
-        └── validation.f90
+        ├── validation.f90
+        └── libsentinel_validation.dll / .so
 ```
 
 ## Output structure
@@ -58,8 +63,8 @@ sentinel_processor/
     └── vis_<name>_<timestamp>.tif/.nc
 ```
 
-File naming: `<name>_<YYYYMMDDTHHMMSS>` when `LocationSpec.name` is set, `<YYYY-MM-DD>_<lat>_<lon>` otherwise.
-Files are always overwritten.
+File naming: `<name>_<YYYYMMDDTHHMMSS>` when `LocationSpec.name` is set,
+`<YYYY-MM-DD>_<lat>_<lon>` otherwise. Files are always overwritten.
 
 ## API reference
 
@@ -119,26 +124,47 @@ Rejected scenes return an empty list and are not saved.
 STAC search
     │
     ▼
-per scene (scene_workers threads)
+per scene  (scene_workers threads)
     │
-    ├── fetch spectral bands  ──  band_workers threads, parallel
-    ├── fetch tech layers     ──  band_workers threads, parallel
-    └── fetch visual assets   ──  band_workers threads, parallel
-    │
-    ▼
-align bands to reference CRS  (reproject_match / interp)
+    ├── fetch spectral bands   ──  band_workers threads, parallel
+    ├── fetch tech layers      ──  band_workers threads, parallel
+    └── fetch visual assets    ──  band_workers threads, parallel
     │
     ▼
-pansharpening  ──  optional, Fortran  (gram_schmidt / ihs / wavelet)
+align bands to reference grid
+    ├── same CRS   →  reproject_nearest()    Fortran  [raster_ops]
+    └── other CRS  →  reproject_match()      rioxarray fallback
     │
     ▼
-validation  ──  optional, Fortran  (check_dimensions → validate_scl → check_radiometry)
+pansharpening  ──  optional, Fortran  [pansharpening]
+    │   ├── rgb_to_luminance()   collapse visual RGB → PAN   [raster_ops]
+    │   └── gram_schmidt / ihs / wavelet
+    │
+    ▼
+validation  ──  optional, Fortran  [validation]
+    │   check_dimensions → validate_scl → check_radiometry
     │
     └── pass  →  save .tif / .nc + report.json
 ```
 
-See [PANSHARPENING.md](PANSHARPENING.md) for algorithm details.
+See [PANSHARPENING.md](PANSHARPENING.md) for pansharpening details.
+See [RASTER_OPS.md](RASTER_OPS.md) for individual Fortran raster routine details.
 See [VALIDATION.md](VALIDATION.md) for validation thresholds and Fortran routines.
+
+## Fortran acceleration summary
+
+| Operation | Before | After |
+|---|---|---|
+| Align 20 m / 60 m bands to 10 m reference | `reproject_match` (GDAL warp) | `reproject_nearest` (Fortran) |
+| Align inside `_clip` to reference grid | `reproject_match` (GDAL warp) | `reproject_nearest` (Fortran) |
+| Collapse RGB visual → PAN luminance | `np.tensordot` (Python) | `rgb_to_luminance` (Fortran) |
+| Pansharpening algorithms | — | `gram_schmidt` / `ihs` / `wavelet` (Fortran) |
+| SCL cloud/snow validation | — | `validate_scl` (Fortran) |
+| Dimension check | — | `check_dimensions` (Fortran) |
+| Radiometry check | — | `check_radiometry` (Fortran) |
+
+All Fortran paths have NumPy/rioxarray fallbacks — if a library is not compiled
+the downloader continues to work correctly, only slower.
 
 ## Validation pipeline
 
@@ -160,7 +186,7 @@ check_radiometry()   ── < 1% pixels above 15 000 DN
     └── all pass → files saved
 ```
 
-See [VALIDATION.md](VALIDATION.md) for full details on thresholds and the Fortran routines.
+See [VALIDATION.md](VALIDATION.md) for full details.
 
 ## Validation report JSON
 
@@ -317,8 +343,7 @@ results = sp.download_sentinel2(
 )
 ```
 
-See [PANSHARPENING.md](PANSHARPENING.md) for algorithm details, build instructions,
-and the low-level Python API.
+See [PANSHARPENING.md](PANSHARPENING.md) for algorithm details and build instructions.
 
 ### Tune parallelism
 

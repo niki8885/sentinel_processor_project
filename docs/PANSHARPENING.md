@@ -10,7 +10,10 @@ implemented in Fortran and exposed via `libsentinel_processing`:
 MS bands (coarser resolution)
     │
     ▼
-bilinear_upsample()   ──  upsample each MS band to PAN grid (Fortran, per-band)
+bilinear_upsample()     ──  upsample each MS band to PAN grid  [pansharpening]
+    │
+    ▼
+rgb_to_luminance()      ──  collapse visual RGB → single PAN   [raster_ops]
     │
     ▼
 algorithm choice
@@ -27,30 +30,34 @@ Enable it by setting `pansharpen_algorithm` in `DownloadConfig`.
 
 ## Install
 
+```bat
+# Windows
+gfortran -O2 -shared -o "...\sentinel_processor\processing\fortran\libsentinel_processing.dll" "...\sentinel_processor\processing\fortran\pansharpening.f90"
+```
+
 ```bash
 # Linux / macOS
 gfortran -O2 -shared -fPIC \
   -o sentinel_processor/processing/fortran/libsentinel_processing.so \
   sentinel_processor/processing/fortran/pansharpening.f90
-
-# Windows (MSYS2 UCRT64 terminal)
-gfortran -O2 -shared \
-  -o sentinel_processor\processing\fortran\libsentinel_processing.dll \
-  sentinel_processor\processing\fortran\pansharpening.f90
 ```
 
-Without the compiled library, setting `pansharpen_algorithm` logs a warning and
-returns the unsharpened bands unchanged.
+`libsentinel_raster_ops` is also required for the PAN preparation step
+(`rgb_to_luminance`). See [RASTER_OPS.md](RASTER_OPS.md) for its build command.
+If either library is missing, pansharpening is skipped with a warning.
 
 ## Module layout
 
 ```
 sentinel_processor/
 └── processing/
-    ├── _fortran_bridge.py
+    ├── _fortran_bridge.py        ← pansharpening bridge
+    ├── _raster_ops_bridge.py     ← raster ops bridge
     └── fortran/
         ├── pansharpening.f90
-        └── libsentinel_processing.dll / .so
+        ├── raster_ops.f90
+        ├── libsentinel_processing.dll / .so
+        └── libsentinel_raster_ops.dll / .so
 ```
 
 ## API reference
@@ -112,8 +119,7 @@ Steps:
 4. Inject matched PAN as the new I
 5. Inverse IHS transform
 
-Fastest option for RGB triplets. Works well when bands 1–3 span a similar wavelength
-range to the PAN channel.
+Fastest option for RGB triplets.
 
 ### Wavelet (`wavelet`)
 
@@ -126,21 +132,22 @@ Steps (per band):
 4. Replace the LL subband of MS with the LL subband of PAN
 5. Inverse DWT → sharpened band
 
-Retains original high-frequency texture from the MS bands while injecting PAN
-spatial structure into the low-frequency subband.
+Retains original high-frequency texture from the MS bands while injecting
+PAN spatial structure into the low-frequency subband.
 
 ## PAN source on Sentinel-2
 
 Sentinel-2 does not have a dedicated panchromatic band. The `visual` STAC asset
 (the default `pansharpen_pan_key`) is an RGB composite at 10 m. The bridge
-automatically collapses it to a single luminance channel before passing it to
-Fortran:
+collapses it to a single luminance channel via `rgb_to_luminance` (Fortran):
 
 | Channels in asset | Collapse method |
 |---|---|
 | 1 | Used directly |
-| 3 (RGB) | Rec. 601 weighted sum: `Y = 0.299·R + 0.587·G + 0.114·B` |
-| > 3 | Equal-weight mean |
+| 3 (RGB) | Rec. 601: `Y = 0.299·R + 0.587·G + 0.114·B` |
+| > 3 | Equal-weight mean: `1 / n_bands` per band |
+
+See [RASTER_OPS.md](RASTER_OPS.md#rgb_to_luminance) for implementation details.
 
 ## Array layout
 
@@ -158,23 +165,27 @@ The output buffer is allocated in the same order and transposed back to
 ```python
 import sentinel_processor as sp
 
+# Gram-Schmidt — any number of bands
 cfg = sp.DownloadConfig(
     bands                = sp.SpectralBands.RGB_NIR,
     pansharpen_algorithm = "gram_schmidt",
 )
 
+# IHS — exactly 3 bands required
+cfg = sp.DownloadConfig(
+    bands                = sp.SpectralBands.RGB,
+    pansharpen_algorithm = "ihs",
+)
+
+# Wavelet — any number of bands
+cfg = sp.DownloadConfig(
+    bands                = sp.SpectralBands.ALL,
+    pansharpen_algorithm = "wavelet",
+)
+
 results = sp.download_sentinel2(
     [sp.LocationSpec(lat=47.56, lon=19.17, name="budapest")],
     cfg=cfg,
-)
-```
-
-IHS — exactly 3 bands required:
-
-```python
-cfg = sp.DownloadConfig(
-    bands                = sp.SpectralBands.RGB,   # exactly 3
-    pansharpen_algorithm = "ihs",
 )
 ```
 
@@ -184,8 +195,8 @@ cfg = sp.DownloadConfig(
 import numpy as np
 from sentinel_processor.processing._fortran_bridge import pansharpen
 
-pan = np.random.rand(1000, 1000)          # high-res PAN
-ms  = np.random.rand(10, 250, 250)        # 10 MS bands at coarser resolution
+pan = np.random.rand(1000, 1000)       # high-res PAN
+ms  = np.random.rand(10, 250, 250)     # 10 MS bands at coarser resolution
 
 sharpened = pansharpen(pan, ms, algorithm="gram_schmidt")
 print(sharpened.shape)   # (10, 1000, 1000)
@@ -195,7 +206,7 @@ print(sharpened.shape)   # (10, 1000, 1000)
 
 Pansharpened bands are saved in place of the original spectral stack — same
 filenames, same output directory (`spectral/`), but at PAN resolution.
-The `_report.json` sidecar (when `save_report=True`) gains an extra field:
+The `_report.json` sidecar (when `save_report=True`) gains extra fields:
 
 ```json
 {

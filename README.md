@@ -243,3 +243,5 @@ git clone https://github.com/niki8885/sentinel-processor
 cd sentinel-processor
 pip install -e ".[dev]"
 ```
+
+gfortran -O2 -shared -o "C:\Users\nikit\PycharmProjects\sentinel_processor_project\sentinel_processor\processing\fortran\libsentinel_processing.dll" "C:\Users\nikit\PycharmProjects\sentinel_processor_project\sentinel_processor\processing\fortran\pansharpening.f90"

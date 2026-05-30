@@ -25,6 +25,12 @@ from sentinel_processor.config import (
 )
 from sentinel_processor.validation._fortran_bridge import call_check_radiometry, call_check_dimensions, call_validate_scl
 from sentinel_processor.processing._fortran_bridge import pansharpen, Algorithm as PanAlgorithm
+from sentinel_processor.processing._raster_ops_bridge import (
+    rgb_to_luminance as _ft_rgb_to_luminance,
+    align_bands      as _ft_align_bands,
+    reproject_nearest as _ft_reproject_nearest,
+    band_stats       as _ft_band_stats,
+)
 from sentinel_processor.utils.data_utils import LocationSpec, SpectralBands, TechnicalLayers, VisualAssets, _BandGroup
 
 logger = logging.getLogger(__name__)
@@ -89,6 +95,21 @@ class DownloadConfig:
         return path
 
 
+def _extract_affine(da: xr.DataArray) -> tuple[float, float, float, float] | None:
+    try:
+        xs = da.coords["x"].values
+        ys = da.coords["y"].values
+        if xs.size < 2 or ys.size < 2:
+            return None
+        pw = float(xs[1] - xs[0])
+        ph = float(ys[1] - ys[0])
+        if abs(pw) < 1e-12 or abs(ph) < 1e-12:
+            return None
+        return float(xs[0]), float(ys[0]), pw, ph
+    except Exception:
+        return None
+
+
 def _clip(
     da: xr.DataArray,
     lon: float,
@@ -102,13 +123,35 @@ def _clip(
         crs="EPSG:4326",
         allow_one_dimensional_raster=True,
     )
-    if (
-        reference_da is not None
-        and clipped.rio.crs is not None
-        and reference_da.rio.crs is not None
-    ):
-        clipped = clipped.rio.reproject_match(reference_da)
-    return clipped.squeeze().drop_vars(["band"], errors="ignore")
+    clipped = clipped.squeeze().drop_vars(["band"], errors="ignore")
+
+    if reference_da is None:
+        return clipped
+    if clipped.rio.crs is None or reference_da.rio.crs is None:
+        return clipped
+
+    if clipped.rio.crs == reference_da.rio.crs:
+        src_affine = _extract_affine(clipped)
+        dst_affine = _extract_affine(reference_da)
+        if src_affine is not None and dst_affine is not None:
+            dst_rows = reference_da.shape[-2]
+            dst_cols = reference_da.shape[-1]
+            src_np = clipped.values.astype(np.float64)
+            if src_np.ndim == 3 and src_np.shape[0] == 1:
+                src_np = src_np[0]
+            if src_np.ndim == 2:
+                out_np = _ft_reproject_nearest(
+                    src_np, src_affine, dst_rows, dst_cols, dst_affine
+                )
+                return xr.DataArray(
+                    out_np,
+                    dims=["y", "x"],
+                    coords={"y": reference_da.coords["y"],
+                            "x": reference_da.coords["x"]},
+                    attrs=clipped.attrs,
+                ).rio.write_crs(clipped.rio.crs)
+
+    return clipped.rio.reproject_match(reference_da)
 
 
 def _save_both(da_or_ds: xr.DataArray | xr.Dataset, directory: str, base: str) -> list[str]:
@@ -234,14 +277,11 @@ def _apply_pansharpening(
                 pan_np = pan_np[0]
             else:
                 n_ch = pan_np.shape[0]
-                if n_ch == 3:
-                    weights = np.array([0.299, 0.587, 0.114], dtype=np.float64)
-                else:
-                    weights = np.full(n_ch, 1.0 / n_ch, dtype=np.float64)
-                pan_np = np.tensordot(weights, pan_np, axes=([0], [0]))
+                # Fortran: Rec. 601 for 3 bands, equal weights otherwise
+                pan_np = _ft_rgb_to_luminance(pan_np)
                 logger.debug(
                     f"[pansharpen] {item.id}: collapsed {n_ch}-band visual "
-                    f"to luminance PAN {pan_np.shape}"
+                    f"to luminance PAN {pan_np.shape} via Fortran"
                 )
 
         ms_np = ds.values.astype(np.float64)
@@ -330,11 +370,43 @@ def _download_item(
     reference_da = arrays[0]
 
     if reference_da.rio.crs is not None:
+        dst_rows = reference_da.shape[-2]
+        dst_cols = reference_da.shape[-1]
+        dst_affine = _extract_affine(reference_da)
+        ref_crs = reference_da.rio.crs
+
         aligned: list[xr.DataArray] = []
         for da in arrays:
             if da is reference_da:
                 aligned.append(da)
-            elif da.rio.crs is not None:
+                continue
+
+            if (
+                dst_affine is not None
+                and da.rio.crs is not None
+                and da.rio.crs == ref_crs
+            ):
+                src_affine = _extract_affine(da)
+                src_np = da.values.astype(np.float64)
+                if src_np.ndim == 3 and src_np.shape[0] == 1:
+                    src_np = src_np[0]
+                if src_affine is not None and src_np.ndim == 2:
+                    out_np = _ft_reproject_nearest(
+                        src_np, src_affine, dst_rows, dst_cols, dst_affine
+                    )
+                    aligned.append(
+                        xr.DataArray(
+                            out_np,
+                            dims=["y", "x"],
+                            coords={"y": reference_da.coords["y"],
+                                    "x": reference_da.coords["x"]},
+                            attrs=da.attrs,
+                        ).rio.write_crs(ref_crs)
+                    )
+                    continue
+
+            # Slow path: different CRS or can't extract affine
+            if da.rio.crs is not None:
                 aligned.append(da.rio.reproject_match(reference_da))
             else:
                 aligned.append(
