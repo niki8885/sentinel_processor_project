@@ -24,6 +24,7 @@ from sentinel_processor.config import (
     STAC_API_URL,
 )
 from sentinel_processor.validation._fortran_bridge import call_check_radiometry, call_check_dimensions, call_validate_scl
+from sentinel_processor.processing._fortran_bridge import pansharpen, Algorithm as PanAlgorithm
 from sentinel_processor.utils.data_utils import LocationSpec, SpectralBands, TechnicalLayers, VisualAssets, _BandGroup
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,8 @@ class DownloadConfig:
     validate: bool = True
     band_workers: int = 4
     scene_workers: int = 2
+    pansharpen_algorithm: PanAlgorithm | None = None
+    pansharpen_pan_key: str = "visual"
     max_cloud_threshold: float = MAX_CLOUD_THRESHOLD
     min_confidence: float = MIN_CONFIDENCE_TO_SAVE
     save_report: bool = SAVE_VALIDATION_REPORT
@@ -200,6 +203,79 @@ def _run_validation(
     return passes, report
 
 
+def _apply_pansharpening(
+    ds: xr.DataArray,
+    item,
+    lon: float,
+    lat: float,
+    half: float,
+    cfg: DownloadConfig,
+) -> xr.DataArray:
+
+    pan_asset = item.assets.get(cfg.pansharpen_pan_key)
+    if not pan_asset:
+        logger.warning(
+            f"[pansharpen] PAN asset '{cfg.pansharpen_pan_key}' not found "
+            f"in {item.id} — skipping pansharpening"
+        )
+        return ds
+
+    try:
+        pan_da = rioxarray.open_rasterio(pan_asset.href)
+        pan_clipped = _clip(pan_da, lon, lat, half)
+    except Exception as exc:
+        logger.warning(f"[pansharpen] Failed to load PAN for {item.id}: {exc}")
+        return ds
+
+    try:
+        pan_np = pan_clipped.values.astype(np.float64)
+        if pan_np.ndim == 3:
+            if pan_np.shape[0] == 1:
+                pan_np = pan_np[0]
+            else:
+                n_ch = pan_np.shape[0]
+                if n_ch == 3:
+                    weights = np.array([0.299, 0.587, 0.114], dtype=np.float64)
+                else:
+                    weights = np.full(n_ch, 1.0 / n_ch, dtype=np.float64)
+                pan_np = np.tensordot(weights, pan_np, axes=([0], [0]))
+                logger.debug(
+                    f"[pansharpen] {item.id}: collapsed {n_ch}-band visual "
+                    f"to luminance PAN {pan_np.shape}"
+                )
+
+        ms_np = ds.values.astype(np.float64)
+        if ms_np.ndim == 2:
+            ms_np = ms_np[np.newaxis]
+
+        sharpened_np = pansharpen(pan_np, ms_np, algorithm=cfg.pansharpen_algorithm)
+    except Exception as exc:
+        logger.warning(f"[pansharpen] Fortran call failed for {item.id}: {exc}")
+        return ds
+
+    pan_rows, pan_cols = pan_np.shape
+    sharpened_da = xr.DataArray(
+        sharpened_np,
+        dims=["band", "y", "x"],
+        coords={
+            "band": ds.coords["band"],
+            "y": pan_clipped.coords["y"] if "y" in pan_clipped.coords else np.arange(pan_rows),
+            "x": pan_clipped.coords["x"] if "x" in pan_clipped.coords else np.arange(pan_cols),
+        },
+    )
+    if pan_clipped.rio.crs is not None:
+        sharpened_da = sharpened_da.rio.set_spatial_dims(
+            x_dim="x", y_dim="y"
+        ).rio.write_crs(pan_clipped.rio.crs)
+
+    logger.debug(
+        f"[pansharpen] {item.id} sharpened "
+        f"{ms_np.shape[1]}×{ms_np.shape[2]} → {pan_rows}×{pan_cols} "
+        f"via {cfg.pansharpen_algorithm}"
+    )
+    return sharpened_da
+
+
 def _fetch_band(
     key: str,
     href: str,
@@ -274,6 +350,8 @@ def _download_item(
     if reference_da.rio.crs:
         ds = ds.rio.set_spatial_dims(x_dim="x", y_dim="y").rio.write_crs(reference_da.rio.crs)
 
+    if cfg.pansharpen_algorithm is not None:
+        ds = _apply_pansharpening(ds, item, lon, lat, half, cfg)
 
     report: dict = {"item_id": item.id, "passed": True}
     if cfg.validate:

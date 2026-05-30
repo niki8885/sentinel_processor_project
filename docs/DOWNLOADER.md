@@ -32,6 +32,10 @@ sentinel_processor/
 │   └── downloader.py
 ├── utils/
 │   └── data_utils.py
+├── processing/
+│   ├── _fortran_bridge.py
+│   └── fortran/
+│       └── pansharpening.f90
 └── validation/
     ├── _fortran_bridge.py
     └── fortran/
@@ -84,8 +88,10 @@ class LocationSpec:
 | `end_date` | `datetime \| None` | now | Search window end |
 | `lookback_days` | `int` | `30` | Used when `start_date` is `None` |
 | `validate` | `bool` | `True` | Run Fortran quality checks before saving |
-| `band_workers` | `int` | `4` | Parallel threads for band downloads |
-| `scene_workers` | `int` | `2` | Parallel threads for scene processing |
+| `band_workers` | `int` | `4` | Parallel threads per scene (bands, tech layers, visuals) |
+| `scene_workers` | `int` | `2` | Parallel threads across scenes |
+| `pansharpen_algorithm` | `"gram_schmidt" \| "ihs" \| "wavelet" \| None` | `None` | Pansharpening algorithm; `None` disables |
+| `pansharpen_pan_key` | `str` | `"visual"` | STAC asset key used as the PAN source |
 | `max_cloud_threshold` | `float` | `0.30` | Max allowed cloud fraction (0–1) |
 | `min_confidence` | `float` | `0.01` | Min confidence score to accept scene |
 | `save_report` | `bool` | `True` | Write JSON validation sidecar per scene |
@@ -106,6 +112,33 @@ validates them, and writes spectral, technical, and visual rasters to disk.
 Returns `dict[base_name → list_of_written_paths]`.
 Rejected scenes return an empty list and are not saved.
 `progress=False` suppresses the terminal progress bar.
+
+## Processing pipeline
+
+```
+STAC search
+    │
+    ▼
+per scene (scene_workers threads)
+    │
+    ├── fetch spectral bands  ──  band_workers threads, parallel
+    ├── fetch tech layers     ──  band_workers threads, parallel
+    └── fetch visual assets   ──  band_workers threads, parallel
+    │
+    ▼
+align bands to reference CRS  (reproject_match / interp)
+    │
+    ▼
+pansharpening  ──  optional, Fortran  (gram_schmidt / ihs / wavelet)
+    │
+    ▼
+validation  ──  optional, Fortran  (check_dimensions → validate_scl → check_radiometry)
+    │
+    └── pass  →  save .tif / .nc + report.json
+```
+
+See [PANSHARPENING.md](PANSHARPENING.md) for algorithm details.
+See [VALIDATION.md](VALIDATION.md) for validation thresholds and Fortran routines.
 
 ## Validation pipeline
 
@@ -254,6 +287,52 @@ results = sp.download_sentinel2(
     cfg=sp.DownloadConfig(bands=sp.SpectralBands.RGB_NIR),
 )
 ```
+
+### With pansharpening
+
+```python
+import sentinel_processor as sp
+
+# Gram-Schmidt — any number of bands
+cfg = sp.DownloadConfig(
+    bands                = sp.SpectralBands.ALL,
+    pansharpen_algorithm = "gram_schmidt",
+)
+
+# IHS — exactly 3 bands
+cfg = sp.DownloadConfig(
+    bands                = sp.SpectralBands.RGB,
+    pansharpen_algorithm = "ihs",
+)
+
+# Wavelet — any number of bands
+cfg = sp.DownloadConfig(
+    bands                = sp.SpectralBands.AGRICULTURE,
+    pansharpen_algorithm = "wavelet",
+)
+
+results = sp.download_sentinel2(
+    [sp.LocationSpec(lat=47.56, lon=19.17, name="budapest")],
+    cfg=cfg,
+)
+```
+
+See [PANSHARPENING.md](PANSHARPENING.md) for algorithm details, build instructions,
+and the low-level Python API.
+
+### Tune parallelism
+
+```python
+cfg = sp.DownloadConfig(
+    band_workers  = 8,   # more threads per scene (fast connection)
+    scene_workers = 1,   # one scene at a time (memory-constrained)
+)
+```
+
+`band_workers` controls parallel downloads within a single scene (spectral bands,
+tech layers, and visual assets each get their own pool of this size).
+`scene_workers` controls how many scenes are processed concurrently.
+Total thread ceiling is roughly `scene_workers × band_workers × 3`.
 
 ### Disable validation
 

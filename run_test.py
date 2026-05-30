@@ -8,6 +8,7 @@ cfg = sp.DownloadConfig(
     keep_items          = 5,
     max_cloud_threshold = 0.15,
     min_confidence      = 0.75,
+    pansharpen_algorithm = "gram_schmidt",
 )
 
 results = sp.download_sentinel2(
