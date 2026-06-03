@@ -6,11 +6,23 @@ import os
 import warnings
 from dataclasses import dataclass, field
 from typing import Sequence, Union
+from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 import numpy as np
 import rioxarray
 import xarray as xr
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pystac_client import Client
+
+_GDAL_ENV = {
+    "GDAL_HTTP_MULTIPLEX": "YES",
+    "GDAL_HTTP_VERSION": "2",
+    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+    "CPL_VSIL_CURL_CACHE_SIZE": "200000000",
+    "GDAL_CACHEMAX": "512",
+    "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
+    "GDAL_MAX_CONNECTIONS": "8",
+}
+for _k, _v in _GDAL_ENV.items():
+    os.environ.setdefault(_k, _v)
 
 from sentinel_processor.config import (
     DEFAULT_BBOX_HALF_DEG,
@@ -23,23 +35,32 @@ from sentinel_processor.config import (
     SAVE_VALIDATION_REPORT,
     STAC_API_URL,
 )
-from sentinel_processor.validation._fortran_bridge import call_check_radiometry, call_check_dimensions, call_validate_scl
-from sentinel_processor.processing._fortran_bridge import pansharpen, Algorithm as PanAlgorithm
+from sentinel_processor.validation._fortran_bridge import (
+    call_check_radiometry,
+    call_check_dimensions,
+    call_validate_scl,
+)
+from sentinel_processor.processing._fortran_bridge import (
+    pansharpen,
+    Algorithm as PanAlgorithm,
+)
 from sentinel_processor.processing._raster_ops_bridge import (
     rgb_to_luminance as _ft_rgb_to_luminance,
-    align_bands      as _ft_align_bands,
+    align_bands as _ft_align_bands,
     reproject_nearest as _ft_reproject_nearest,
-    band_stats       as _ft_band_stats,
+    band_stats as _ft_band_stats,
 )
-from sentinel_processor.utils.data_utils import LocationSpec, SpectralBands, TechnicalLayers, VisualAssets, _BandGroup
+from sentinel_processor.utils.data_utils import (
+    LocationSpec, SpectralBands, TechnicalLayers, VisualAssets, _BandGroup,
+)
 
 logger = logging.getLogger(__name__)
-
 logging.getLogger("rasterio.session").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=FutureWarning, module="xarray")
 
 try:
     import rasterio as _r
+
     _proj = os.path.join(os.path.dirname(_r.__file__), "proj_data")
     if os.path.isdir(_proj):
         os.environ.setdefault("PROJ_DATA", _proj)
@@ -49,6 +70,8 @@ except Exception:
 
 BandInput = Union[_BandGroup, list[str]]
 
+
+# Configuration
 
 @dataclass
 class DownloadConfig:
@@ -63,8 +86,8 @@ class DownloadConfig:
     end_date: datetime.datetime | None = None
     lookback_days: int = DEFAULT_LOOKBACK_DAYS
     validate: bool = True
-    band_workers: int = 4
-    scene_workers: int = 2
+    band_workers: int = 8
+    scene_workers: int = 4
     pansharpen_algorithm: PanAlgorithm | None = None
     pansharpen_pan_key: str = "visual"
     max_cloud_threshold: float = MAX_CLOUD_THRESHOLD
@@ -75,11 +98,17 @@ class DownloadConfig:
         return self.end_date or datetime.datetime.now(datetime.UTC)
 
     def resolved_start(self) -> datetime.datetime:
-        return self.start_date or (self.resolved_end() - datetime.timedelta(days=self.lookback_days))
+        return (
+                self.start_date
+                or (self.resolved_end() - datetime.timedelta(days=self.lookback_days))
+        )
 
     def date_range_str(self) -> str:
         fmt = "%Y-%m-%dT%H:%M:%SZ"
-        return f"{self.resolved_start().strftime(fmt)}/{self.resolved_end().strftime(fmt)}"
+        return (
+            f"{self.resolved_start().strftime(fmt)}/"
+            f"{self.resolved_end().strftime(fmt)}"
+        )
 
     def band_keys(self) -> list[str]:
         return list(self.bands) if isinstance(self.bands, _BandGroup) else self.bands
@@ -87,13 +116,19 @@ class DownloadConfig:
     def tech_keys(self) -> list[str]:
         if self.tech_bands is None:
             return []
-        return list(self.tech_bands) if isinstance(self.tech_bands, _BandGroup) else self.tech_bands
+        return (
+            list(self.tech_bands)
+            if isinstance(self.tech_bands, _BandGroup)
+            else self.tech_bands
+        )
 
     def subdir(self, kind: str) -> str:
         path = os.path.join(self.output_dir, kind)
         os.makedirs(path, exist_ok=True)
         return path
 
+
+# Geometry helpers
 
 def _extract_affine(da: xr.DataArray) -> tuple[float, float, float, float] | None:
     try:
@@ -111,11 +146,11 @@ def _extract_affine(da: xr.DataArray) -> tuple[float, float, float, float] | Non
 
 
 def _clip(
-    da: xr.DataArray,
-    lon: float,
-    lat: float,
-    half: float,
-    reference_da: xr.DataArray | None = None,
+        da: xr.DataArray,
+        lon: float,
+        lat: float,
+        half: float,
+        reference_da: xr.DataArray | None = None,
 ) -> xr.DataArray:
     clipped = da.rio.clip_box(
         minx=lon - half, miny=lat - half,
@@ -136,30 +171,45 @@ def _clip(
         if src_affine is not None and dst_affine is not None:
             dst_rows = reference_da.shape[-2]
             dst_cols = reference_da.shape[-1]
-            src_np = clipped.values.astype(np.float64)
+            src_np = np.asarray(clipped.values, dtype=np.float64)
             if src_np.ndim == 3 and src_np.shape[0] == 1:
                 src_np = src_np[0]
             if src_np.ndim == 2:
                 out_np = _ft_reproject_nearest(
                     src_np, src_affine, dst_rows, dst_cols, dst_affine
                 )
-                return xr.DataArray(
-                    out_np,
-                    dims=["y", "x"],
-                    coords={"y": reference_da.coords["y"],
-                            "x": reference_da.coords["x"]},
-                    attrs=clipped.attrs,
-                ).rio.write_crs(clipped.rio.crs)
+                return (
+                    xr.DataArray(
+                        out_np,
+                        dims=["y", "x"],
+                        coords={
+                            "y": reference_da.coords["y"],
+                            "x": reference_da.coords["x"],
+                        },
+                        attrs=clipped.attrs,
+                    ).rio.write_crs(clipped.rio.crs)
+                )
 
     return clipped.rio.reproject_match(reference_da)
 
 
-def _save_both(da_or_ds: xr.DataArray | xr.Dataset, directory: str, base: str) -> list[str]:
+# I/O helpers
+
+def _save_both(
+        da_or_ds: xr.DataArray | xr.Dataset,
+        directory: str,
+        base: str,
+) -> list[str]:
     written: list[str] = []
     tif_path = os.path.join(directory, base + ".tif")
-    raster = da_or_ds.to_array(dim="band") if isinstance(da_or_ds, xr.Dataset) else da_or_ds
+    raster = (
+        da_or_ds.to_array(dim="band")
+        if isinstance(da_or_ds, xr.Dataset)
+        else da_or_ds
+    )
     raster.rio.to_raster(tif_path)
     written.append(tif_path)
+
     nc_path = os.path.join(directory, base + ".nc")
     try:
         nc_obj = da_or_ds
@@ -184,45 +234,79 @@ def _save_both(da_or_ds: xr.DataArray | xr.Dataset, directory: str, base: str) -
         written.append(nc_path)
     except ValueError as exc:
         if "backend" in str(exc).lower() or "netcdf" in str(exc).lower():
-            logger.debug(f"[sentinel] NetCDF backend not available — skipping {nc_path}")
+            logger.debug(
+                f"[sentinel] NetCDF backend not available — skipping {nc_path}"
+            )
         else:
             raise
     return written
 
 
+def _write_report(report: dict, directory: str, base_name: str) -> None:
+    path = os.path.join(directory, f"{base_name}_report.json")
+    with open(path, "w") as fh:
+        json.dump(report, fh, indent=2, default=str)
+    logger.debug(f"[validation] Report → {path}")
+
+
+# Validation
+
 def _run_validation(
-    item,
-    lon: float,
-    lat: float,
-    half: float,
-    reference_da: xr.DataArray | None,
-    cfg: DownloadConfig,
-) -> tuple[bool, dict]:
+        item,
+        lon: float,
+        lat: float,
+        half: float,
+        reference_da: xr.DataArray | None,
+        cfg: DownloadConfig,
+) -> tuple[bool, dict, xr.DataArray | None]:
     report: dict = {"item_id": item.id, "passed": False}
+
     scl_asset = item.assets.get("scl")
     if not scl_asset:
-        logger.warning(f"[validation] No SCL asset for {item.id} — skipping validation")
+        logger.warning(
+            f"[validation] No SCL asset for {item.id} — skipping validation"
+        )
         report["warning"] = "SCL asset missing; validation skipped"
         report["passed"] = True
-        return True, report
+        return True, report, None
+
+    stac_shape = (
+            scl_asset.extra_fields.get("proj:shape")
+            or item.properties.get("proj:shape")
+    )
+    if stac_shape and len(stac_shape) >= 2:
+        pre_rows, pre_cols = int(stac_shape[0]), int(stac_shape[1])
+        dim_result = call_check_dimensions(pre_rows, pre_cols)
+        if not dim_result["passed"]:
+            report.update({
+                "rows": pre_rows, "cols": pre_cols,
+                "dimension_pass": False,
+                "issues": dim_result["issues"],
+            })
+            logger.info(
+                f"[validation] {item.id} rejected by dimension pre-check "
+                f"({pre_rows}×{pre_cols}): {dim_result['issues']}"
+            )
+            return False, report, None
+
     try:
-        da = rioxarray.open_rasterio(scl_asset.href)
+        da = rioxarray.open_rasterio(scl_asset.href, lock=False)
         clipped = _clip(da, lon, lat, half, reference_da)
-        scl_arr = clipped.values.flatten().astype(int).tolist()
     except Exception as exc:
         logger.warning(f"[validation] SCL read failed for {item.id}: {exc}")
         report["error"] = str(exc)
         report["passed"] = True
-        return True, report
+        return True, report, None
 
-    # --- dimension check (rejects degenerate shapes like 15×1152) ---
     clipped_shape = clipped.values.shape
     rows = clipped_shape[-2] if clipped.values.ndim >= 2 else 1
     cols = clipped_shape[-1] if clipped.values.ndim >= 1 else 1
+
     dim_result = call_check_dimensions(rows, cols)
-    report["rows"] = rows
-    report["cols"] = cols
-    report["dimension_pass"] = dim_result["passed"]
+    report.update({
+        "rows": rows, "cols": cols,
+        "dimension_pass": dim_result["passed"],
+    })
     if not dim_result["passed"]:
         report["issues"] = dim_result["issues"]
         report["passed"] = False
@@ -230,31 +314,37 @@ def _run_validation(
             f"[validation] {item.id} rejected by dimension check "
             f"({rows}×{cols}): {dim_result['issues']}"
         )
-        return False, report
-    scl_result = call_validate_scl(scl_arr, cfg.max_cloud_threshold)
+        return False, report, None
+
+    scl_np = np.asarray(clipped.values, dtype=np.int32).ravel()
+    scl_result = call_validate_scl(scl_np, cfg.max_cloud_threshold)
     report.update(scl_result)
+
     radio_pass = True
     try:
-        pixel_vals = clipped.values.flatten().astype(float)
-        radio_pass = call_check_radiometry(pixel_vals)
+        radio_pass = call_check_radiometry(scl_np.astype(np.float64, copy=False))
     except Exception as exc:
-        logger.warning(f"[validation] Radiometry check failed for {item.id}: {exc}")
+        logger.warning(
+            f"[validation] Radiometry check failed for {item.id}: {exc}"
+        )
         report["radiometry_error"] = str(exc)
+
     report["radiometry_pass"] = radio_pass
     passes = scl_result["confidence_score"] >= cfg.min_confidence and radio_pass
     report["passed"] = passes
-    return passes, report
+    return passes, report, clipped
 
+
+# Pansharpening
 
 def _apply_pansharpening(
-    ds: xr.DataArray,
-    item,
-    lon: float,
-    lat: float,
-    half: float,
-    cfg: DownloadConfig,
+        ds: xr.DataArray,
+        item,
+        lon: float,
+        lat: float,
+        half: float,
+        cfg: DownloadConfig,
 ) -> xr.DataArray:
-
     pan_asset = item.assets.get(cfg.pansharpen_pan_key)
     if not pan_asset:
         logger.warning(
@@ -264,27 +354,22 @@ def _apply_pansharpening(
         return ds
 
     try:
-        pan_da = rioxarray.open_rasterio(pan_asset.href)
+        pan_da = rioxarray.open_rasterio(pan_asset.href, lock=False)
         pan_clipped = _clip(pan_da, lon, lat, half)
     except Exception as exc:
         logger.warning(f"[pansharpen] Failed to load PAN for {item.id}: {exc}")
         return ds
 
     try:
-        pan_np = pan_clipped.values.astype(np.float64)
+        pan_np = np.asarray(pan_clipped.values, dtype=np.float64)
         if pan_np.ndim == 3:
-            if pan_np.shape[0] == 1:
-                pan_np = pan_np[0]
-            else:
-                n_ch = pan_np.shape[0]
-                # Fortran: Rec. 601 for 3 bands, equal weights otherwise
-                pan_np = _ft_rgb_to_luminance(pan_np)
-                logger.debug(
-                    f"[pansharpen] {item.id}: collapsed {n_ch}-band visual "
-                    f"to luminance PAN {pan_np.shape} via Fortran"
-                )
+            pan_np = (
+                pan_np[0]
+                if pan_np.shape[0] == 1
+                else _ft_rgb_to_luminance(pan_np)
+            )
 
-        ms_np = ds.values.astype(np.float64)
+        ms_np = np.asarray(ds.values, dtype=np.float64)
         if ms_np.ndim == 2:
             ms_np = ms_np[np.newaxis]
 
@@ -299,15 +384,24 @@ def _apply_pansharpening(
         dims=["band", "y", "x"],
         coords={
             "band": ds.coords["band"],
-            "y": pan_clipped.coords["y"] if "y" in pan_clipped.coords else np.arange(pan_rows),
-            "x": pan_clipped.coords["x"] if "x" in pan_clipped.coords else np.arange(pan_cols),
+            "y": (
+                pan_clipped.coords["y"]
+                if "y" in pan_clipped.coords
+                else np.arange(pan_rows)
+            ),
+            "x": (
+                pan_clipped.coords["x"]
+                if "x" in pan_clipped.coords
+                else np.arange(pan_cols)
+            ),
         },
     )
     if pan_clipped.rio.crs is not None:
-        sharpened_da = sharpened_da.rio.set_spatial_dims(
-            x_dim="x", y_dim="y"
-        ).rio.write_crs(pan_clipped.rio.crs)
-
+        sharpened_da = (
+            sharpened_da
+            .rio.set_spatial_dims(x_dim="x", y_dim="y")
+            .rio.write_crs(pan_clipped.rio.crs)
+        )
     logger.debug(
         f"[pansharpen] {item.id} sharpened "
         f"{ms_np.shape[1]}×{ms_np.shape[2]} → {pan_rows}×{pan_cols} "
@@ -316,27 +410,30 @@ def _apply_pansharpening(
     return sharpened_da
 
 
+# Per-band fetch
+
 def _fetch_band(
-    key: str,
-    href: str,
-    lon: float,
-    lat: float,
-    half: float,
+        key: str,
+        href: str,
+        lon: float,
+        lat: float,
+        half: float,
 ) -> tuple[str, xr.DataArray]:
-    da = rioxarray.open_rasterio(href)
+    da = rioxarray.open_rasterio(href, lock=False)
     return key, _clip(da, lon, lat, half)
 
 
+# Core scene download
+
 def _download_item(
-    item,
-    lon: float,
-    lat: float,
-    base_name: str,
-    cfg: DownloadConfig,
+        item,
+        lon: float,
+        lat: float,
+        base_name: str,
+        cfg: DownloadConfig,
 ) -> list[str]:
     half = cfg.bbox_half_deg
     written: list[str] = []
-
 
     band_tasks: dict[str, str] = {}
     for key in cfg.band_keys():
@@ -346,143 +443,182 @@ def _download_item(
         else:
             logger.warning(f"[sentinel] Missing band '{key}' in {item.id}")
 
-    band_results: dict[str, xr.DataArray] = {}
     with ThreadPoolExecutor(max_workers=cfg.band_workers) as pool:
-        futures = {
+
+        val_future: Future | None = None
+        if cfg.validate:
+            val_future = pool.submit(
+                _run_validation, item, lon, lat, half, None, cfg
+            )
+
+        band_futures: dict[Future, str] = {
             pool.submit(_fetch_band, key, href, lon, lat, half): key
             for key, href in band_tasks.items()
         }
-        for future in as_completed(futures):
-            key = futures[future]
+
+        passes = True
+        report: dict = {"item_id": item.id, "passed": True}
+        cached_scl: xr.DataArray | None = None
+
+        if val_future is not None:
+            try:
+                passes, report, cached_scl = val_future.result()
+            except Exception as exc:
+                logger.warning(
+                    f"[validation] Unexpected error for {item.id}: {exc}"
+                )
+                passes = True
+
+            if not passes:
+                for f in band_futures:
+                    f.cancel()
+
+                _conf = report.get("confidence_score")
+                _cloud = report.get("cloud_ratio")
+                _conf_s = f"{_conf:.2f}" if isinstance(_conf, float) else "?"
+                _cloud_s = f"{_cloud:.2f}" if isinstance(_cloud, float) else "?"
+                logger.info(
+                    f"[validation] {base_name} rejected "
+                    f"(confidence={_conf_s}, "
+                    f"cloud={_cloud_s}, "
+                    f"rows={report.get('rows', '?')}, "
+                    f"cols={report.get('cols', '?')}, "
+                    f"issues={report.get('issues', [])})"
+                )
+                if cfg.save_report:
+                    _write_report(report, cfg.subdir("spectral"), base_name)
+                return []
+
+        band_results: dict[str, xr.DataArray] = {}
+        for future in as_completed(band_futures):
+            key = band_futures[future]
             try:
                 _, clipped = future.result()
                 band_results[key] = clipped
             except Exception as exc:
                 logger.warning(f"[sentinel] Band '{key}' failed: {exc}")
 
-    ok_keys = [k for k in cfg.band_keys() if k in band_results]
-    arrays = [band_results[k] for k in ok_keys]
+        ok_keys = [k for k in cfg.band_keys() if k in band_results]
+        arrays = [band_results[k] for k in ok_keys]
 
-    if not arrays:
-        logger.warning(f"[sentinel] No spectral bands for {base_name} — item skipped.")
-        return []
-
-    reference_da = arrays[0]
-
-    if reference_da.rio.crs is not None:
-        dst_rows = reference_da.shape[-2]
-        dst_cols = reference_da.shape[-1]
-        dst_affine = _extract_affine(reference_da)
-        ref_crs = reference_da.rio.crs
-
-        aligned: list[xr.DataArray] = []
-        for da in arrays:
-            if da is reference_da:
-                aligned.append(da)
-                continue
-
-            if (
-                dst_affine is not None
-                and da.rio.crs is not None
-                and da.rio.crs == ref_crs
-            ):
-                src_affine = _extract_affine(da)
-                src_np = da.values.astype(np.float64)
-                if src_np.ndim == 3 and src_np.shape[0] == 1:
-                    src_np = src_np[0]
-                if src_affine is not None and src_np.ndim == 2:
-                    out_np = _ft_reproject_nearest(
-                        src_np, src_affine, dst_rows, dst_cols, dst_affine
-                    )
-                    aligned.append(
-                        xr.DataArray(
-                            out_np,
-                            dims=["y", "x"],
-                            coords={"y": reference_da.coords["y"],
-                                    "x": reference_da.coords["x"]},
-                            attrs=da.attrs,
-                        ).rio.write_crs(ref_crs)
-                    )
-                    continue
-
-            # Slow path: different CRS or can't extract affine
-            if da.rio.crs is not None:
-                aligned.append(da.rio.reproject_match(reference_da))
-            else:
-                aligned.append(
-                    da.interp(
-                        x=reference_da.coords["x"],
-                        y=reference_da.coords["y"],
-                        method="nearest",
-                    )
-                )
-        arrays = aligned
-
-    ds = xr.concat(arrays, dim="band").assign_coords(band=ok_keys)
-    if reference_da.rio.crs:
-        ds = ds.rio.set_spatial_dims(x_dim="x", y_dim="y").rio.write_crs(reference_da.rio.crs)
-
-    if cfg.pansharpen_algorithm is not None:
-        ds = _apply_pansharpening(ds, item, lon, lat, half, cfg)
-
-    report: dict = {"item_id": item.id, "passed": True}
-    if cfg.validate:
-        passes, report = _run_validation(item, lon, lat, half, reference_da, cfg)
-        if not passes:
-            _conf = report.get("confidence_score")
-            _cloud = report.get("cloud_ratio")
-            _conf_s  = f"{_conf:.2f}"  if isinstance(_conf,  float) else "?"
-            _cloud_s = f"{_cloud:.2f}" if isinstance(_cloud, float) else "?"
-            logger.info(
-                f"[validation] {base_name} rejected "
-                f"(confidence={_conf_s}, cloud={_cloud_s}, "
-                f"rows={report.get('rows', '?')}, cols={report.get('cols', '?')}, "
-                f"issues={report.get('issues', [])})"
+        if not arrays:
+            logger.warning(
+                f"[sentinel] No spectral bands for {base_name} — item skipped."
             )
-            if cfg.save_report:
-                _write_report(report, cfg.subdir("spectral"), base_name)
             return []
 
-    written.extend(_save_both(ds, cfg.subdir("spectral"), base_name))
-    if cfg.save_report:
-        _write_report(report, cfg.subdir("spectral"), base_name)
+        reference_da = arrays[0]
 
-    def _fetch_tech(key: str, href: str) -> tuple[str, list[str]]:
-        da = rioxarray.open_rasterio(href)
-        layer = _clip(da, lon, lat, half, reference_da)
-        paths = _save_both(layer, cfg.subdir("technical"), f"{key}_{base_name}")
-        return key, paths
+        if reference_da.rio.crs is not None:
+            dst_rows = reference_da.shape[-2]
+            dst_cols = reference_da.shape[-1]
+            dst_affine = _extract_affine(reference_da)
+            ref_crs = reference_da.rio.crs
+            aligned: list[xr.DataArray] = []
 
-    tech_tasks = {
-        key: item.assets[key].href
-        for key in cfg.tech_keys()
-        if key in item.assets
-    }
-    with ThreadPoolExecutor(max_workers=cfg.band_workers) as pool:
-        futures_tech = {pool.submit(_fetch_tech, k, h): k for k, h in tech_tasks.items()}
-        for future in as_completed(futures_tech):
-            key = futures_tech[future]
+            for da in arrays:
+                if da is reference_da:
+                    aligned.append(da)
+                    continue
+
+                if (
+                        dst_affine is not None
+                        and da.rio.crs is not None
+                        and da.rio.crs == ref_crs
+                ):
+                    src_affine = _extract_affine(da)
+                    src_np = np.asarray(da.values, dtype=np.float64)
+                    if src_np.ndim == 3 and src_np.shape[0] == 1:
+                        src_np = src_np[0]
+                    if src_affine is not None and src_np.ndim == 2:
+                        out_np = _ft_reproject_nearest(
+                            src_np, src_affine, dst_rows, dst_cols, dst_affine
+                        )
+                        aligned.append(
+                            xr.DataArray(
+                                out_np,
+                                dims=["y", "x"],
+                                coords={
+                                    "y": reference_da.coords["y"],
+                                    "x": reference_da.coords["x"],
+                                },
+                                attrs=da.attrs,
+                            ).rio.write_crs(ref_crs)
+                        )
+                        continue
+
+                if da.rio.crs is not None:
+                    aligned.append(da.rio.reproject_match(reference_da))
+                else:
+                    aligned.append(
+                        da.interp(
+                            x=reference_da.coords["x"],
+                            y=reference_da.coords["y"],
+                            method="nearest",
+                        )
+                    )
+            arrays = aligned
+
+        ds = xr.concat(arrays, dim="band").assign_coords(band=ok_keys)
+        if reference_da.rio.crs:
+            ds = (
+                ds.rio.set_spatial_dims(x_dim="x", y_dim="y")
+                .rio.write_crs(reference_da.rio.crs)
+            )
+
+        if cfg.pansharpen_algorithm is not None:
+            ds = _apply_pansharpening(ds, item, lon, lat, half, cfg)
+
+        written.extend(_save_both(ds, cfg.subdir("spectral"), base_name))
+        if cfg.save_report:
+            _write_report(report, cfg.subdir("spectral"), base_name)
+
+        # Technical layers
+        def _fetch_tech(key: str, href: str) -> tuple[str, list[str]]:
+            if key == "scl" and cached_scl is not None:
+                paths = _save_both(
+                    cached_scl, cfg.subdir("technical"), f"{key}_{base_name}"
+                )
+                return key, paths
+            da = rioxarray.open_rasterio(href, lock=False)
+            layer = _clip(da, lon, lat, half, reference_da)
+            return key, _save_both(layer, cfg.subdir("technical"), f"{key}_{base_name}")
+
+        tech_tasks = {
+            key: item.assets[key].href
+            for key in cfg.tech_keys()
+            if key in item.assets
+        }
+        tech_futures = {
+            pool.submit(_fetch_tech, k, h): k
+            for k, h in tech_tasks.items()
+        }
+        for future in as_completed(tech_futures):
+            key = tech_futures[future]
             try:
                 _, paths = future.result()
                 written.extend(paths)
             except Exception as exc:
                 logger.warning(f"[sentinel] Layer '{key}' failed: {exc}")
 
-    if cfg.visual:
-        def _fetch_visual(vis_key: str, href: str) -> list[str]:
-            da = rioxarray.open_rasterio(href)
-            vis = _clip(da, lon, lat, half)
-            return _save_both(vis, cfg.subdir("visual"), f"vis_{base_name}")
+        # Visual
+        if cfg.visual:
+            def _fetch_visual(vis_key: str, href: str) -> list[str]:
+                da = rioxarray.open_rasterio(href, lock=False)
+                vis = _clip(da, lon, lat, half)
+                return _save_both(vis, cfg.subdir("visual"), f"vis_{base_name}")
 
-        vis_tasks = {
-            vis_key: item.assets[vis_key].href
-            for vis_key in list(VisualAssets.VISUAL)
-            if vis_key in item.assets
-        }
-        with ThreadPoolExecutor(max_workers=cfg.band_workers) as pool:
-            futures_vis = {pool.submit(_fetch_visual, k, h): k for k, h in vis_tasks.items()}
-            for future in as_completed(futures_vis):
-                vis_key = futures_vis[future]
+            vis_tasks = {
+                vis_key: item.assets[vis_key].href
+                for vis_key in list(VisualAssets.VISUAL)
+                if vis_key in item.assets
+            }
+            vis_futures = {
+                pool.submit(_fetch_visual, k, h): k
+                for k, h in vis_tasks.items()
+            }
+            for future in as_completed(vis_futures):
+                vis_key = vis_futures[future]
                 try:
                     written.extend(future.result())
                 except Exception as exc:
@@ -491,19 +627,13 @@ def _download_item(
     return written
 
 
-def _write_report(report: dict, directory: str, base_name: str) -> None:
-    path = os.path.join(directory, f"{base_name}_report.json")
-    with open(path, "w") as fh:
-        json.dump(report, fh, indent=2, default=str)
-    logger.debug(f"[validation] Report → {path}")
-
+# Public entry point
 
 def download_sentinel2(
-    locations: Sequence[LocationSpec],
-    cfg: DownloadConfig | None = None,
-    progress: bool = True,
+        locations: Sequence[LocationSpec],
+        cfg: DownloadConfig | None = None,
+        progress: bool = True,
 ) -> dict[str, list[str]]:
-
     if cfg is None:
         cfg = DownloadConfig()
 
@@ -528,7 +658,9 @@ def download_sentinel2(
             continue
         items = sorted(
             items,
-            key=lambda x: x.datetime or datetime.datetime.min.replace(tzinfo=datetime.UTC),
+            key=lambda x: (
+                    x.datetime or datetime.datetime.min.replace(tzinfo=datetime.UTC)
+            ),
             reverse=True,
         )[: cfg.keep_items]
         for item in items:
@@ -542,7 +674,10 @@ def download_sentinel2(
 
     scene_tasks: list[tuple[object, LocationSpec, str]] = []
     for item, loc in all_items:
-        timestamp = item.datetime or datetime.datetime.min.replace(tzinfo=datetime.UTC)
+        timestamp = (
+                item.datetime
+                or datetime.datetime.min.replace(tzinfo=datetime.UTC)
+        )
         base_name = (
             f"{loc.name}_{timestamp.strftime('%Y%m%dT%H%M%S')}"
             if loc.name
@@ -551,7 +686,8 @@ def download_sentinel2(
         scene_tasks.append((item, loc, base_name))
 
     completed_count = 0
-    lock = __import__("threading").Lock()
+    import threading
+    lock = threading.Lock()
 
     def _process_scene(args: tuple) -> tuple[str, list[str]]:
         nonlocal completed_count
@@ -571,9 +707,8 @@ def download_sentinel2(
 
 
 def _progress_start(total: int, enabled: bool) -> None:
-    if not enabled:
-        return
-    print(f"\n  Fetching {total} scene(s)\n")
+    if enabled:
+        print(f"\n  Fetching {total} scene(s)\n")
 
 
 def _progress_update(idx: int, total: int, name: str, enabled: bool) -> None:

@@ -2,8 +2,8 @@ from __future__ import annotations
 import ctypes
 import sys
 from pathlib import Path
-import numpy as np
 
+import numpy as np
 
 _LIB_NAME = (
     "libsentinel_raster_ops.dll" if sys.platform == "win32"
@@ -13,6 +13,7 @@ _LIB_PATH = Path(__file__).parent / "fortran" / _LIB_NAME
 
 if sys.platform == "win32":
     import os as _os
+
     for _candidate in [
         r"C:\msys64\ucrt64\bin",
         r"C:\msys64\mingw64\bin",
@@ -23,6 +24,8 @@ if sys.platform == "win32":
             break
 
 _lib = None
+_DBL_P = ctypes.POINTER(ctypes.c_double)
+_INT_P = ctypes.POINTER(ctypes.c_int)
 
 
 def _get_lib() -> ctypes.CDLL:
@@ -37,73 +40,80 @@ def _get_lib() -> ctypes.CDLL:
             "  (Windows) gfortran -O2 -shared -o libsentinel_raster_ops.dll raster_ops.f90"
         )
     _lib = ctypes.CDLL(str(_LIB_PATH))
-
-    dbl_p = ctypes.POINTER(ctypes.c_double)
-    int_p = ctypes.POINTER(ctypes.c_int)
     c_int = ctypes.c_int
     c_dbl = ctypes.c_double
 
     _lib.rgb_to_luminance.restype = None
-    _lib.rgb_to_luminance.argtypes = [dbl_p, c_int, c_int, c_int, dbl_p]
+    _lib.rgb_to_luminance.argtypes = [_DBL_P, c_int, c_int, c_int, _DBL_P]
 
     _lib.align_bands.restype = None
-    _lib.align_bands.argtypes = [dbl_p, c_int, c_int, dbl_p, c_int, c_int]
+    _lib.align_bands.argtypes = [_DBL_P, c_int, c_int, _DBL_P, c_int, c_int]
 
     _lib.clip_box_indices.restype = None
     _lib.clip_box_indices.argtypes = [
         c_dbl, c_dbl, c_dbl, c_dbl,
         c_int, c_int,
         c_dbl, c_dbl, c_dbl, c_dbl,
-        int_p, int_p, int_p, int_p,
+        _INT_P, _INT_P, _INT_P, _INT_P,
     ]
 
     _lib.band_stats.restype = None
-    _lib.band_stats.argtypes = [dbl_p, c_int, dbl_p, dbl_p, dbl_p, dbl_p]
+    _lib.band_stats.argtypes = [_DBL_P, c_int, _DBL_P, _DBL_P, _DBL_P, _DBL_P]
 
     _lib.normalize_band.restype = None
-    _lib.normalize_band.argtypes = [dbl_p, c_int, c_dbl, c_dbl, c_dbl, c_dbl]
+    _lib.normalize_band.argtypes = [_DBL_P, c_int, c_dbl, c_dbl, c_dbl, c_dbl]
 
     _lib.reproject_nearest.restype = None
     _lib.reproject_nearest.argtypes = [
-        dbl_p, c_int, c_int, c_dbl, c_dbl, c_dbl, c_dbl,
-        dbl_p, c_int, c_int, c_dbl, c_dbl, c_dbl, c_dbl,
+        _DBL_P, c_int, c_int, c_dbl, c_dbl, c_dbl, c_dbl,
+        _DBL_P, c_int, c_int, c_dbl, c_dbl, c_dbl, c_dbl,
     ]
-
     return _lib
 
 
+# Internal helpers
+
 def _f64_f(arr: np.ndarray) -> tuple[ctypes.POINTER, np.ndarray]:
-    a = np.asfortranarray(arr, dtype=np.float64)
-    return a.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), a
+    a = np.asarray(arr, dtype=np.float64)
+    if not a.flags["F_CONTIGUOUS"]:
+        a = np.asfortranarray(a)
+    return a.ctypes.data_as(_DBL_P), a
 
 
 def _empty_f(shape: tuple) -> tuple[ctypes.POINTER, np.ndarray]:
-    a = np.empty(shape, dtype=np.float64, order='F')
-    return a.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), a
+    a = np.empty(shape, dtype=np.float64, order="F")
+    return a.ctypes.data_as(_DBL_P), a
 
+
+def _ptr(arr: np.ndarray) -> ctypes.POINTER:
+    return arr.ctypes.data_as(_DBL_P)
+
+
+# Public API
 
 def rgb_to_luminance(arr: np.ndarray) -> np.ndarray:
     if arr.ndim == 2:
-        return arr.astype(np.float64, copy=False)
+        return np.asarray(arr, dtype=np.float64)
     if arr.ndim != 3:
         raise ValueError(f"Expected 2-D or 3-D array, got shape {arr.shape}")
 
     n_bands, rows, cols = arr.shape
 
     if n_bands == 1:
-        return arr[0].astype(np.float64, copy=False)
+        return np.asarray(arr[0], dtype=np.float64)
 
     try:
         lib = _get_lib()
     except FileNotFoundError:
-        if n_bands == 3:
-            w = np.array([0.299, 0.587, 0.114])
-        else:
-            w = np.full(n_bands, 1.0 / n_bands)
+        w = (
+            np.array([0.299, 0.587, 0.114])
+            if n_bands == 3
+            else np.full(n_bands, 1.0 / n_bands)
+        )
         return np.tensordot(w, arr.astype(np.float64), axes=([0], [0]))
 
     src_f = np.asfortranarray(arr.transpose(1, 2, 0), dtype=np.float64)
-    src_ptr = src_f.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+    src_ptr = src_f.ctypes.data_as(_DBL_P)
 
     dst_ptr, dst = _empty_f((rows, cols))
     lib.rgb_to_luminance(
@@ -115,12 +125,7 @@ def rgb_to_luminance(arr: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(dst)
 
 
-def align_bands(
-    src: np.ndarray,
-    dst_rows: int,
-    dst_cols: int,
-) -> np.ndarray:
-
+def align_bands(src: np.ndarray, dst_rows: int, dst_cols: int) -> np.ndarray:
     if src.ndim != 2:
         raise ValueError(f"src must be 2-D, got shape {src.shape}")
 
@@ -150,13 +155,12 @@ def align_bands(
 
 
 def clip_box_indices(
-    origin_x: float, origin_y: float,
-    pixel_w: float,  pixel_h: float,
-    rows: int,       cols: int,
-    min_lon: float,  max_lon: float,
-    min_lat: float,  max_lat: float,
+        origin_x: float, origin_y: float,
+        pixel_w: float, pixel_h: float,
+        rows: int, cols: int,
+        min_lon: float, max_lon: float,
+        min_lat: float, max_lat: float,
 ) -> tuple[int, int, int, int]:
-
     try:
         lib = _get_lib()
     except FileNotFoundError:
@@ -170,14 +174,16 @@ def clip_box_indices(
             r1 = min(int((max_lat - origin_y) / pixel_h) + 1, rows)
         return r0, r1, c0, c1
 
-    r_min = ctypes.c_int(0); r_max = ctypes.c_int(0)
-    c_min = ctypes.c_int(0); c_max = ctypes.c_int(0)
+    r_min = ctypes.c_int(0);
+    r_max = ctypes.c_int(0)
+    c_min = ctypes.c_int(0);
+    c_max = ctypes.c_int(0)
     lib.clip_box_indices(
         ctypes.c_double(origin_x), ctypes.c_double(origin_y),
-        ctypes.c_double(pixel_w),  ctypes.c_double(pixel_h),
-        ctypes.c_int(rows),        ctypes.c_int(cols),
-        ctypes.c_double(min_lon),  ctypes.c_double(max_lon),
-        ctypes.c_double(min_lat),  ctypes.c_double(max_lat),
+        ctypes.c_double(pixel_w), ctypes.c_double(pixel_h),
+        ctypes.c_int(rows), ctypes.c_int(cols),
+        ctypes.c_double(min_lon), ctypes.c_double(max_lon),
+        ctypes.c_double(min_lat), ctypes.c_double(max_lat),
         ctypes.byref(r_min), ctypes.byref(r_max),
         ctypes.byref(c_min), ctypes.byref(c_max),
     )
@@ -185,7 +191,10 @@ def clip_box_indices(
 
 
 def band_stats(arr: np.ndarray) -> dict[str, float]:
-    flat = arr.ravel().astype(np.float64)
+    # ravel() returns a view for C-contiguous arrays — no copy in the hot path
+    flat = np.asarray(arr, dtype=np.float64).ravel()
+    if not flat.flags["C_CONTIGUOUS"]:
+        flat = np.ascontiguousarray(flat)
     n = flat.size
 
     try:
@@ -193,33 +202,37 @@ def band_stats(arr: np.ndarray) -> dict[str, float]:
     except FileNotFoundError:
         return {
             "mean": float(flat.mean()),
-            "std":  float(flat.std()),
-            "min":  float(flat.min()),
-            "max":  float(flat.max()),
+            "std": float(flat.std()),
+            "min": float(flat.min()),
+            "max": float(flat.max()),
         }
 
-    ptr, ref = _f64_f(flat)
-    mean = ctypes.c_double(0.0); std  = ctypes.c_double(0.0)
-    mn   = ctypes.c_double(0.0); mx   = ctypes.c_double(0.0)
+    ptr = flat.ctypes.data_as(_DBL_P)
+    mean = ctypes.c_double(0.0);
+    std = ctypes.c_double(0.0)
+    mn = ctypes.c_double(0.0);
+    mx = ctypes.c_double(0.0)
     lib.band_stats(
         ptr, ctypes.c_int(n),
         ctypes.byref(mean), ctypes.byref(std),
-        ctypes.byref(mn),   ctypes.byref(mx),
+        ctypes.byref(mn), ctypes.byref(mx),
     )
-    del ref
-    return {"mean": mean.value, "std": std.value,
-            "min": mn.value,   "max": mx.value}
+    return {
+        "mean": mean.value, "std": std.value,
+        "min": mn.value, "max": mx.value,
+    }
 
 
 def normalize_band(
-    arr: np.ndarray,
-    src_min: float | None = None,
-    src_max: float | None = None,
-    out_min: float = 0.0,
-    out_max: float = 1.0,
+        arr: np.ndarray,
+        src_min: float | None = None,
+        src_max: float | None = None,
+        out_min: float = 0.0,
+        out_max: float = 1.0,
 ) -> np.ndarray:
-    arr = np.asfortranarray(arr, dtype=np.float64)
-    flat = arr.ravel()   # view
+    arr_f = np.asfortranarray(arr, dtype=np.float64)
+    flat = arr_f.ravel(order="K")
+
     if src_min is None or src_max is None:
         st = band_stats(flat)
         if src_min is None: src_min = st["min"]
@@ -227,9 +240,9 @@ def normalize_band(
 
     try:
         lib = _get_lib()
-        ptr = flat.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+        ptr = arr_f.ctypes.data_as(_DBL_P)
         lib.normalize_band(
-            ptr, ctypes.c_int(flat.size),
+            ptr, ctypes.c_int(arr_f.size),
             ctypes.c_double(src_min), ctypes.c_double(src_max),
             ctypes.c_double(out_min), ctypes.c_double(out_max),
         )
@@ -240,17 +253,16 @@ def normalize_band(
         else:
             flat[:] = out_min
 
-    return arr
+    return arr_f
 
 
 def reproject_nearest(
-    src: np.ndarray,
-    src_affine: tuple[float, float, float, float],
-    dst_rows: int,
-    dst_cols: int,
-    dst_affine: tuple[float, float, float, float],
+        src: np.ndarray,
+        src_affine: tuple[float, float, float, float],
+        dst_rows: int,
+        dst_cols: int,
+        dst_affine: tuple[float, float, float, float],
 ) -> np.ndarray:
-
     if src.ndim != 2:
         raise ValueError(f"src must be 2-D, got shape {src.shape}")
 
