@@ -21,3 +21,7 @@ __pycache__/
 *.so
 *.exe
 *.dll
+
+*.egg-info/
+build/
+dist/
