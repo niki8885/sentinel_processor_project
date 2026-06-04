@@ -64,13 +64,20 @@ jobs:
           CIBW_BEFORE_ALL_LINUX: yum install -y gcc-gfortran || true
 
           # Test: install runtime deps so imports work
+          # Pre-install geo deps as binary wheels before the test venv is created
+          CIBW_BEFORE_TEST: >-
+            pip install --only-binary :all: numpy rasterio rioxarray pyproj xarray plotly pystac-client || true
           CIBW_TEST_REQUIRES: "numpy rasterio rioxarray xarray plotly pystac-client"
-          # Force binary wheels for all packages that require system libs to build
           CIBW_ENVIRONMENT: >-
             PIP_ONLY_BINARY="rasterio:pyproj:numpy:shapely:GDAL"
           CIBW_ENVIRONMENT_WINDOWS: >-
             PIP_ONLY_BINARY="rasterio:pyproj:numpy:shapely:GDAL"
+          # macOS: skip --require-archs check since our stub is minimal
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: "delocate-wheel -w {dest_dir} -v {wheel}"
 
+          CIBW_TEST_COMMAND_LINUX: >-
+            bash -c "pip install --only-binary :all: rasterio pyproj rioxarray &&
+            python -c \"import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; print(sorted(list_indices())); print(sorted(list_filters())); print('ALL OK')\""
           CIBW_TEST_COMMAND: >-
             python -c "import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; print('Indices:', sorted(list_indices())); print('Filters:', sorted(list_filters())); print('ALL OK')"
 

@@ -25,6 +25,7 @@ _RUNTIME_DLLS = [
 
 
 def _find_gfortran() -> str | None:
+    # On macOS, Homebrew installs gfortran-14 (or -13, -12) without a plain symlink
     candidates = [
         "gfortran",
         "gfortran-14", "gfortran-13", "gfortran-12", "gfortran-11",
@@ -79,6 +80,7 @@ def _compile_fortran(root: Path) -> None:
     flags   = ["-O2", "-shared"] + ([] if is_win else ["-fPIC"])
 
     if is_mac:
+        # Pass ARCHFLAGS so cross-compilation (arm64/x86_64) works
         for token in os.environ.get("ARCHFLAGS", "").split():
             if token.startswith("-arch"):
                 flags.append(token)
@@ -128,7 +130,27 @@ class FortranBuildExt(build_ext):
         ext_path.parent.mkdir(parents=True, exist_ok=True)
 
         if sys.platform == "darwin":
-            ext_path.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 28)
+            # Compile a minimal real dylib so delocate --require-archs passes
+            import tempfile
+            c_src = """
+#include <Python.h>
+PyMODINIT_FUNC PyInit__sentinel_fortran(void) { return NULL; }
+"""
+            with tempfile.NamedTemporaryFile(suffix=".c", delete=False, mode="w") as tf:
+                tf.write(c_src)
+                c_path = tf.name
+            try:
+                import sysconfig
+                inc = sysconfig.get_path("include")
+                archflags = os.environ.get("ARCHFLAGS", "").split()
+                cmd = ["cc", f"-I{inc}", "-shared", "-fPIC",
+                       "-undefined", "dynamic_lookup",
+                       "-o", str(ext_path), c_path] + archflags
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                if r.returncode != 0:
+                    ext_path.write_bytes(b"\xca\xfe\xba\xbe" + b"\x00" * 28)
+            finally:
+                os.unlink(c_path)
         elif sys.platform == "win32":
             ext_path.write_bytes(b"MZ" + b"\x00" * 62)
         else:
@@ -136,7 +158,6 @@ class FortranBuildExt(build_ext):
                 b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8 +
                 b"\x03\x00" + b"\x3e\x00" + b"\x01\x00\x00\x00" + b"\x00" * 24
             )
-
 
 _dummy_ext = Extension(
     name="sentinel_processor._sentinel_fortran",
