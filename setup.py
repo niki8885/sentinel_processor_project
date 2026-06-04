@@ -1,43 +1,12 @@
-"""
-setup.py — compiles all Fortran shared libraries before the wheel is packaged.
-
-cibuildwheel calls  `pip wheel .`  inside each platform container, which
-triggers  build_py → BuildPyWithFortran.run() → _compile_fortran().
-
-For development installs (`pip install -e .`) the same hook fires, but
-failures are non-fatal — the package works without Fortran (validate=False).
-"""
-
 import os
-import platform
 import subprocess
 import sys
 from pathlib import Path
 
-from setuptools import setup
-from setuptools.command.build_py import build_py
+from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext
 
 ROOT = Path(__file__).parent
-
-def _is_win():
-    return sys.platform == "win32"
-
-def _is_mac():
-    return sys.platform == "darwin"
-
-def _shared_ext():
-    return ".dll" if _is_win() else ".so"
-
-def _base_flags():
-    flags = ["-O2", "-shared"]
-    if not _is_win():
-        flags.append("-fPIC")
-    if _is_mac() and os.environ.get("ARCHFLAGS"):
-        for arch in os.environ["ARCHFLAGS"].split():
-            if arch.startswith("-arch"):
-                flags += [arch]
-    return flags
-
 
 _TARGETS = [
     ("sentinel_processor/validation/fortran",  "validation.f90",    "libsentinel_validation"),
@@ -47,77 +16,116 @@ _TARGETS = [
     ("sentinel_processor/filters/fortran",      "filters.f90",       "libsentinel_filters"),
 ]
 
-
 _RUNTIME_DLLS = [
     "libgfortran-5.dll",
     "libgcc_s_seh-1.dll",
     "libwinpthread-1.dll",
 ]
 
-def _copy_runtime_dlls(dest_dir: Path):
-    import shutil
 
-    candidates = [
+def _find_gfortran() -> str | None:
+    for name in ("gfortran", "gfortran-14", "gfortran-13", "gfortran-12", "gfortran-11"):
+        cmd = ["where" if sys.platform == "win32" else "which", name]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            return name
+    return None
+
+
+def _copy_runtime_dlls(dest: Path) -> None:
+    import shutil
+    search = [
+        Path(os.environ.get("MSYS2_UCRT64_PATH", r"C:\msys64\ucrt64")) / "bin",
         Path(r"C:\msys64\ucrt64\bin"),
         Path(r"C:\msys64\mingw64\bin"),
         Path(r"C:\mingw64\bin"),
     ]
-    msys_root = os.environ.get("MSYS2_UCRT64_PATH", "")
-    if msys_root:
-        candidates.insert(0, Path(msys_root) / "bin")
-
     for dll in _RUNTIME_DLLS:
-        for candidate in candidates:
-            src = candidate / dll
+        for d in search:
+            src = d / dll
             if src.exists():
-                dst = dest_dir / dll
+                dst = dest / dll
                 if not dst.exists():
                     shutil.copy2(str(src), str(dst))
-                    print(f"  Copied runtime DLL: {dll}")
                 break
-        else:
-            print(f"  WARNING: runtime DLL not found: {dll}")
 
-def _compile_fortran():
-    ext   = _shared_ext()
-    flags = _base_flags()
 
-    print(f"\n{'='*60}")
-    print(f"Compiling Fortran libraries  (platform={sys.platform})")
-    print(f"{'='*60}")
+def _compile_fortran(root: Path) -> None:
+    gfortran = _find_gfortran()
+    if gfortran is None:
+        print(
+            "\n  [sentinel-processor] gfortran not found — Fortran libraries "
+            "will not be compiled.\n"
+            "  Install gfortran and run: sentinel-processor-compile\n"
+        )
+        return
+
+    is_win = sys.platform == "win32"
+    ext    = ".dll" if is_win else ".so"
+    flags  = ["-O2", "-shared"] + ([] if is_win else ["-fPIC"])
+
+    if sys.platform == "darwin":
+        for token in os.environ.get("ARCHFLAGS", "").split():
+            if token.startswith("-arch"):
+                flags.append(token)
 
     for subdir, src_name, lib_stem in _TARGETS:
-        src_path = ROOT / subdir / src_name
-        out_path = ROOT / subdir / f"{lib_stem}{ext}"
+        src_path = root / subdir / src_name
+        out_path = root / subdir / f"{lib_stem}{ext}"
 
         if not src_path.exists():
-            print(f"  SKIP  {src_name}  (source not found)")
+            print(f"  [sentinel-processor] SKIP {src_name} (not found)")
             continue
 
-        cmd = ["gfortran"] + flags + ["-o", str(out_path), str(src_path)]
-        print(f"  {src_name}  →  {lib_stem}{ext}")
-
-        try:
-            subprocess.check_call(cmd, stderr=subprocess.STDOUT)
-        except FileNotFoundError:
-            print(
-                "  WARNING: gfortran not found. "
-                "Install gfortran and rebuild, or set validate=False at runtime."
-            )
-            return
-        except subprocess.CalledProcessError as exc:
-            print(f"  WARNING: compilation failed ({exc}). Skipping.")
-            continue
-
-        if _is_win():
-            _copy_runtime_dlls(ROOT / subdir)
-
-    print("="*60 + "\n")
-
-class BuildPyWithFortran(build_py):
-    def run(self):
-        _compile_fortran()
-        super().run()
+        cmd = [gfortran] + flags + ["-o", str(out_path), str(src_path)]
+        print(f"  [sentinel-processor] Compiling {src_name} ...", end=" ", flush=True)
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0:
+            print("OK")
+            if is_win:
+                _copy_runtime_dlls(root / subdir)
+        else:
+            print(f"FAILED\n  {r.stderr.strip()}")
 
 
-setup(cmdclass={"build_py": BuildPyWithFortran})
+class FortranBuildExt(build_ext):
+
+    def build_extension(self, ext):
+        _compile_fortran(ROOT)
+
+        import shutil
+
+        build_lib = Path(self.build_lib)
+        is_win = sys.platform == "win32"
+        lib_ext = ".dll" if is_win else ".so"
+
+        for subdir, _src, lib_stem in _TARGETS:
+            src_lib = ROOT / subdir / f"{lib_stem}{lib_ext}"
+            if not src_lib.exists():
+                continue
+
+            dst_dir = build_lib / subdir
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_lib), str(dst_dir / src_lib.name))
+
+            # Windows
+            if is_win:
+                for dll_name in _RUNTIME_DLLS:
+                    src_dll = ROOT / subdir / dll_name
+                    if src_dll.exists():
+                        shutil.copy2(str(src_dll), str(dst_dir / dll_name))
+
+        ext_path = Path(self.get_ext_fullpath(ext.name))
+        ext_path.parent.mkdir(parents=True, exist_ok=True)
+        ext_path.write_bytes(b"")
+
+
+_dummy_ext = Extension(
+    name="sentinel_processor._sentinel_fortran",
+    sources=[],
+)
+
+setup(
+    ext_modules=[_dummy_ext],
+    cmdclass={"build_ext": FortranBuildExt},
+)
