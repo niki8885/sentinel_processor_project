@@ -1,3 +1,0 @@
-module gFTL_Integer@Container@
-   use gFTL2_Integer@Container@
-end module gFTL_Integer@Container@

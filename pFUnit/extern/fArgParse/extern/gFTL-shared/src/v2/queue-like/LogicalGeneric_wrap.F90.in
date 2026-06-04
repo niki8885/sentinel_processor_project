@@ -1,3 +1,0 @@
-module gFTL_Logical@Container@
-   use gFTL2_Logical@Container@
-end module gFTL_Logical@Container@

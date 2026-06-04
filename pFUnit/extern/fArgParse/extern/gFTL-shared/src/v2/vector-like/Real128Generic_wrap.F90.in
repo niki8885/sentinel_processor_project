@@ -1,3 +1,0 @@
-module gFTL_Real128@Container@
-   use gFTL2_Real128@Container@
-end module gFTL_Real128@Container@

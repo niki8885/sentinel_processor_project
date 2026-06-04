@@ -1,3 +1,0 @@
-module gFTL_Double@Container@
-   use gFTL2_Double@Container@
-end module gFTL_Double@Container@
