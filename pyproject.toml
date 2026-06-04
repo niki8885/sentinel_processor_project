@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68", "wheel", "packaging>=24.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "sentinel-processor"
 version = "0.1.0"
 description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, and Plotly visualisation"
 readme = "README.md"
-license = "AGPL-3.0-only"
+license = {text = "GNU Affero General Public License v3"}
 requires-python = ">=3.10"
 
 keywords = ["sentinel-2", "remote-sensing", "satellite", "stac", "rasterio", "plotly"]

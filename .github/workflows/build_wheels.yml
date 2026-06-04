@@ -61,11 +61,11 @@ jobs:
           CIBW_BUILD_VERBOSITY: "1"
 
           # Linux: install gfortran once per container (before_all)
-          CIBW_BEFORE_ALL_LINUX: yum install -y gcc-gfortran gdal gdal-devel || true
+          CIBW_BEFORE_ALL_LINUX: yum install -y gcc-gfortran || true
 
           # Test: install runtime deps so imports work
           CIBW_TEST_REQUIRES: "numpy rasterio rioxarray xarray plotly pystac-client"
-          CIBW_TEST_EXTRAS: ""
+          CIBW_ENVIRONMENT_PASS_LINUX: "PIP_ONLY_BINARY"
           PIP_ONLY_BINARY: "rasterio"
 
           CIBW_TEST_COMMAND: >-
