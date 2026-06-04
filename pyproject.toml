@@ -14,6 +14,7 @@ keywords = ["sentinel-2", "remote-sensing", "satellite", "stac", "rasterio", "pl
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Topic :: Scientific/Engineering :: GIS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
