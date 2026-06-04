@@ -27,12 +27,14 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install gcc
-          # Homebrew installs gfortran as gfortran-NN — create a plain symlink
-          GF=$(ls /usr/local/bin/gfortran-* /opt/homebrew/bin/gfortran-* 2>/dev/null | head -1)
-          if [ -n "$GF" ]; then
-            ln -sf "$GF" /usr/local/bin/gfortran || sudo ln -sf "$GF" /usr/local/bin/gfortran
-          fi
-          gfortran --version
+          # Find the versioned gfortran binary Homebrew installs
+          GF=$(ls /usr/local/bin/gfortran-* /opt/homebrew/bin/gfortran-* 2>/dev/null | sort -V | tail -1)
+          echo "Found gfortran: $GF"
+          # Create symlink so setup.py can find plain 'gfortran'
+          sudo ln -sf "$GF" /usr/local/bin/gfortran 2>/dev/null || ln -sf "$GF" /usr/local/bin/gfortran || true
+          # Also set env var for setup.py _find_gfortran()
+          echo "GFORTRAN_PATH=$GF" >> $GITHUB_ENV
+          $GF --version
 
       # ── Windows: MSYS2 gfortran ───────────────────────────────────────────
       - name: Set up MSYS2 (Windows)
@@ -59,10 +61,12 @@ jobs:
           CIBW_BUILD_VERBOSITY: "1"
 
           # Linux: install gfortran once per container (before_all)
-          CIBW_BEFORE_ALL_LINUX: yum install -y gcc-gfortran || apt-get install -y gfortran || true
+          CIBW_BEFORE_ALL_LINUX: yum install -y gcc-gfortran gdal gdal-devel || true
 
           # Test: install runtime deps so imports work
           CIBW_TEST_REQUIRES: "numpy rasterio rioxarray xarray plotly pystac-client"
+          CIBW_TEST_EXTRAS: ""
+          PIP_ONLY_BINARY: "rasterio"
 
           CIBW_TEST_COMMAND: >-
             python -c "import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; print('Indices:', sorted(list_indices())); print('Filters:', sorted(list_filters())); print('ALL OK')"

@@ -7,7 +7,7 @@ name = "sentinel-processor"
 version = "0.1.0"
 description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, and Plotly visualisation"
 readme = "README.md"
-license = {file = "LICENSE.md"}
+license = "AGPL-3.0-only"
 requires-python = ">=3.10"
 
 keywords = ["sentinel-2", "remote-sensing", "satellite", "stac", "rasterio", "plotly"]
@@ -15,7 +15,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: GIS",
-    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -42,6 +41,9 @@ dev = [
 ]
 all = ["netCDF4>=1.6", "shapely>=2.0", "geoalchemy2>=0.14"]
 
+[project.scripts]
+"sentinel-processor-compile" = "sentinel_processor._compile:main"
+
 [project.urls]
 Repository    = "https://github.com/niki8885/sentinel-processor"
 Documentation = "https://github.com/niki8885/sentinel-processor/tree/master/docs"
@@ -52,10 +54,12 @@ include = ["sentinel_processor*"]
 
 [tool.setuptools.package-data]
 sentinel_processor = [
+    # Fortran sources (always shipped)
     "validation/fortran/*.f90",
     "indices/fortran/*.f90",
     "processing/fortran/*.f90",
     "filters/fortran/*.f90",
+    # Compiled libraries — included when present (wheels build them in setup.py)
     "validation/fortran/*.so",
     "validation/fortran/*.dll",
     "indices/fortran/*.so",
@@ -64,6 +68,7 @@ sentinel_processor = [
     "processing/fortran/*.dll",
     "filters/fortran/*.so",
     "filters/fortran/*.dll",
+    # MSYS2 runtime DLLs bundled on Windows
     "validation/fortran/libgfortran*.dll",
     "validation/fortran/libgcc*.dll",
     "validation/fortran/libwinpthread*.dll",

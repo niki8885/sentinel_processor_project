@@ -1,4 +1,5 @@
 import os
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -24,11 +25,23 @@ _RUNTIME_DLLS = [
 
 
 def _find_gfortran() -> str | None:
-    for name in ("gfortran", "gfortran-14", "gfortran-13", "gfortran-12", "gfortran-11"):
-        cmd = ["where" if sys.platform == "win32" else "which", name]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            return name
+    candidates = [
+        "gfortran",
+        "gfortran-14", "gfortran-13", "gfortran-12", "gfortran-11",
+        "/usr/local/bin/gfortran-14", "/usr/local/bin/gfortran-13",
+        "/opt/homebrew/bin/gfortran-14", "/opt/homebrew/bin/gfortran-13",
+        "/opt/homebrew/bin/gfortran-12",
+    ]
+    for name in candidates:
+        try:
+            r = subprocess.run(
+                [name, "--version"],
+                capture_output=True, text=True
+            )
+            if r.returncode == 0:
+                return name
+        except FileNotFoundError:
+            continue
     return None
 
 
@@ -60,11 +73,12 @@ def _compile_fortran(root: Path) -> None:
         )
         return
 
-    is_win = sys.platform == "win32"
-    ext    = ".dll" if is_win else ".so"
-    flags  = ["-O2", "-shared"] + ([] if is_win else ["-fPIC"])
+    is_win  = sys.platform == "win32"
+    is_mac  = sys.platform == "darwin"
+    ext     = ".dll" if is_win else ".so"
+    flags   = ["-O2", "-shared"] + ([] if is_win else ["-fPIC"])
 
-    if sys.platform == "darwin":
+    if is_mac:
         for token in os.environ.get("ARCHFLAGS", "").split():
             if token.startswith("-arch"):
                 flags.append(token)
@@ -89,26 +103,21 @@ def _compile_fortran(root: Path) -> None:
 
 
 class FortranBuildExt(build_ext):
-
     def build_extension(self, ext):
         _compile_fortran(ROOT)
 
         import shutil
-
         build_lib = Path(self.build_lib)
-        is_win = sys.platform == "win32"
-        lib_ext = ".dll" if is_win else ".so"
+        is_win    = sys.platform == "win32"
+        lib_ext   = ".dll" if is_win else ".so"
 
         for subdir, _src, lib_stem in _TARGETS:
             src_lib = ROOT / subdir / f"{lib_stem}{lib_ext}"
             if not src_lib.exists():
                 continue
-
             dst_dir = build_lib / subdir
             dst_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(src_lib), str(dst_dir / src_lib.name))
-
-            # Windows
             if is_win:
                 for dll_name in _RUNTIME_DLLS:
                     src_dll = ROOT / subdir / dll_name
@@ -117,7 +126,16 @@ class FortranBuildExt(build_ext):
 
         ext_path = Path(self.get_ext_fullpath(ext.name))
         ext_path.parent.mkdir(parents=True, exist_ok=True)
-        ext_path.write_bytes(b"")
+
+        if sys.platform == "darwin":
+            ext_path.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 28)
+        elif sys.platform == "win32":
+            ext_path.write_bytes(b"MZ" + b"\x00" * 62)
+        else:
+            ext_path.write_bytes(
+                b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8 +
+                b"\x03\x00" + b"\x3e\x00" + b"\x01\x00\x00\x00" + b"\x00" * 24
+            )
 
 
 _dummy_ext = Extension(
