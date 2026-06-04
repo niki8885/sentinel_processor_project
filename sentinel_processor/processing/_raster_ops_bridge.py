@@ -174,9 +174,9 @@ def clip_box_indices(
             r1 = min(int((max_lat - origin_y) / pixel_h) + 1, rows)
         return r0, r1, c0, c1
 
-    r_min = ctypes.c_int(0);
+    r_min = ctypes.c_int(0)
     r_max = ctypes.c_int(0)
-    c_min = ctypes.c_int(0);
+    c_min = ctypes.c_int(0)
     c_max = ctypes.c_int(0)
     lib.clip_box_indices(
         ctypes.c_double(origin_x), ctypes.c_double(origin_y),
@@ -208,9 +208,9 @@ def band_stats(arr: np.ndarray) -> dict[str, float]:
         }
 
     ptr = flat.ctypes.data_as(_DBL_P)
-    mean = ctypes.c_double(0.0);
+    mean = ctypes.c_double(0.0)
     std = ctypes.c_double(0.0)
-    mn = ctypes.c_double(0.0);
+    mn = ctypes.c_double(0.0)
     mx = ctypes.c_double(0.0)
     lib.band_stats(
         ptr, ctypes.c_int(n),
@@ -235,8 +235,10 @@ def normalize_band(
 
     if src_min is None or src_max is None:
         st = band_stats(flat)
-        if src_min is None: src_min = st["min"]
-        if src_max is None: src_max = st["max"]
+        if src_min is None:
+            src_min = st["min"]
+        if src_max is None:
+            src_max = st["max"]
 
     try:
         lib = _get_lib()

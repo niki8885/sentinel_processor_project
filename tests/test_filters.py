@@ -4,7 +4,6 @@ import pytest
 
 from sentinel_processor.filters._filters_bridge import (
     _to_f_f64,
-    _empty_f,
     _prepare_2d,
     apply_to_bands,
     bilateral_filter,

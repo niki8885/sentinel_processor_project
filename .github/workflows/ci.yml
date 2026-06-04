@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Build Fortran + run full test suite
   test:
     name: Test · Python ${{ matrix.python-version }} · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -24,18 +25,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Python
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      # gfortran Linux
       - name: Install gfortran (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y gfortran
 
+      # gfortran Windows (MSYS2 UCRT64)
       - name: Install gfortran (Windows)
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -44,9 +48,11 @@ jobs:
           update: true
           install: mingw-w64-ucrt-x86_64-gcc-fortran
 
+      # Python deps
       - name: Install Python dependencies
         run: pip install -e ".[dev,netcdf]"
 
+      # Compile Fortran Linux
       - name: Compile Fortran libraries (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -68,6 +74,7 @@ jobs:
           compile sentinel_processor/filters/fortran/libsentinel_filters.so \
                    sentinel_processor/filters/fortran/filters.f90
 
+      # Compile Fortran Windows
       - name: Compile Fortran libraries (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -90,6 +97,7 @@ jobs:
           compile sentinel_processor/filters/fortran/libsentinel_filters.dll \
                    sentinel_processor/filters/fortran/filters.f90
 
+      # Copy MSYS2 runtime DLLs Windows
       - name: Copy MSYS2 runtime DLLs (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -100,13 +108,15 @@ jobs:
             cp /ucrt64/bin/libwinpthread-1.dll  sentinel_processor/$dir/fortran/ 2>/dev/null || true
           done
 
+      # Tests
       - name: Run tests
-        run: |
-          pytest tests/ -v --tb=short \
-            --cov=sentinel_processor \
-            --cov-report=xml \
-            --cov-report=term-missing
+        run: >-
+          pytest tests/ -v --tb=short
+          --cov=sentinel_processor
+          --cov-report=xml
+          --cov-report=term-missing
 
+      # Upload coverage (Linux / Python 3.12 only)
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
@@ -114,7 +124,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: false
-
 
   lint:
     name: Lint

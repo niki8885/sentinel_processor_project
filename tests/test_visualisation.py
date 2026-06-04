@@ -4,7 +4,7 @@ import pytest
 plotly = pytest.importorskip("plotly")
 go = pytest.importorskip("plotly.graph_objects")
 
-from sentinel_processor.visualisation.plot import (
+from sentinel_processor.visualisation.plot import (  # noqa: E402
     _extract_band,
     _load_da,
     _pstretch,

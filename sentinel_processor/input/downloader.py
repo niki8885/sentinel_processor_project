@@ -46,9 +46,7 @@ from sentinel_processor.processing._fortran_bridge import (
 )
 from sentinel_processor.processing._raster_ops_bridge import (
     rgb_to_luminance as _ft_rgb_to_luminance,
-    align_bands as _ft_align_bands,
     reproject_nearest as _ft_reproject_nearest,
-    band_stats as _ft_band_stats,
 )
 from sentinel_processor.utils.data_utils import (
     LocationSpec, SpectralBands, TechnicalLayers, VisualAssets, _BandGroup,
@@ -618,7 +616,6 @@ def _download_item(
                 for k, h in vis_tasks.items()
             }
             for future in as_completed(vis_futures):
-                vis_key = vis_futures[future]
                 try:
                     written.extend(future.result())
                 except Exception as exc:

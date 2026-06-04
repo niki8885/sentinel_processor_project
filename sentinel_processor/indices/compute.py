@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-import os
 from pathlib import Path
 from typing import Sequence
 import numpy as np
@@ -262,7 +261,6 @@ def compute_indices(
                         tmpl = candidate.isel(band=0, drop=True).squeeze()
                         template_da = tmpl
                         try:
-                            import rioxarray as _rio
                             crs = candidate.rio.crs
                             if crs is None and "spatial_ref" in ds:
                                 crs = ds["spatial_ref"].attrs.get("crs_wkt") or ds["spatial_ref"].attrs.get("grid_mapping_name")
@@ -373,7 +371,7 @@ def compute_indices(
             if ext == "tif":
                 try:
                     out_da.rio.to_raster(str(out_path), dtype="float32")
-                except Exception as raster_err:
+                except Exception:
                     import rasterio
                     from rasterio.transform import from_bounds
                     arr = out_da.values.astype("float32")

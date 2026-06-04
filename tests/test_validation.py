@@ -122,7 +122,6 @@ class TestValidateScl:
 
     def test_confidence_075_when_cloud_between_10_and_30_pct(self):
         """cloud_ratio = 0.20 -> confidence = 0.75."""
-        n = 100
         scl = [8] * 20 + [4] * 80  # 20% cloud
         r = call_validate_scl(scl, max_cloud_threshold=0.30)
         assert r["cloud_ratio"] == pytest.approx(0.20)

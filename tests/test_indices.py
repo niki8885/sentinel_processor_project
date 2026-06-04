@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import pytest
 
@@ -20,7 +19,6 @@ from sentinel_processor.indices.compute import (
     AVAILABLE_INDICES,
     _BAND_ALIASES,
     _check_missing_bands,
-    _resolve_band_coords,
     compute_indices,
     list_indices,
 )

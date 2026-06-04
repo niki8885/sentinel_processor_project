@@ -1,9 +1,13 @@
 from __future__ import annotations
 import logging
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
+
 import numpy as np
 import xarray as xr
+
+if TYPE_CHECKING:
+    import plotly.graph_objects as go
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +232,6 @@ def plot_mask(
 
     unique_vals, counts = np.unique(scl, return_counts=True)
     class_labels = [SCL_CLASSES.get(int(v), {"label": f"SCL {v}"})["label"] for v in unique_vals]
-    class_colors = [SCL_CLASSES.get(int(v), {"color": "#888888"})["color"]  for v in unique_vals]
     pct_vals     = 100.0 * counts / counts.sum()
     is_bad       = [int(v) in bad_set for v in unique_vals]
 
