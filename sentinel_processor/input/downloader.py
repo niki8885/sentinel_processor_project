@@ -24,7 +24,7 @@ _GDAL_ENV = {
 for _k, _v in _GDAL_ENV.items():
     os.environ.setdefault(_k, _v)
 
-from sentinel_processor.config import (
+from sentinel_processor.config import (  # noqa: E402
     DEFAULT_BBOX_HALF_DEG,
     DEFAULT_KEEP_ITEMS,
     DEFAULT_LOOKBACK_DAYS,
@@ -35,20 +35,20 @@ from sentinel_processor.config import (
     SAVE_VALIDATION_REPORT,
     STAC_API_URL,
 )
-from sentinel_processor.validation._fortran_bridge import (
+from sentinel_processor.validation._fortran_bridge import (  # noqa: E402
     call_check_radiometry,
     call_check_dimensions,
     call_validate_scl,
 )
-from sentinel_processor.processing._fortran_bridge import (
+from sentinel_processor.processing._fortran_bridge import (  # noqa: E402
     pansharpen,
     Algorithm as PanAlgorithm,
 )
-from sentinel_processor.processing._raster_ops_bridge import (
+from sentinel_processor.processing._raster_ops_bridge import (  # noqa: E402
     rgb_to_luminance as _ft_rgb_to_luminance,
     reproject_nearest as _ft_reproject_nearest,
 )
-from sentinel_processor.utils.data_utils import (
+from sentinel_processor.utils.data_utils import (  # noqa: E402
     LocationSpec, SpectralBands, TechnicalLayers, VisualAssets, _BandGroup,
 )
 

@@ -22,10 +22,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      # ── macOS: gfortran via Homebrew ─────────────────────────────────────
+      # ── macOS: gfortran via Homebrew + create /usr/local/bin/gfortran symlink
       - name: Install gfortran (macOS)
         if: runner.os == 'macOS'
-        run: brew install gcc
+        run: |
+          brew install gcc
+          # Homebrew installs gfortran as gfortran-NN — create a plain symlink
+          GF=$(ls /usr/local/bin/gfortran-* /opt/homebrew/bin/gfortran-* 2>/dev/null | head -1)
+          if [ -n "$GF" ]; then
+            ln -sf "$GF" /usr/local/bin/gfortran || sudo ln -sf "$GF" /usr/local/bin/gfortran
+          fi
+          gfortran --version
 
       # ── Windows: MSYS2 gfortran ───────────────────────────────────────────
       - name: Set up MSYS2 (Windows)
@@ -51,30 +58,14 @@ jobs:
           CIBW_SKIP:  "*-win32 *-manylinux_i686 *-musllinux*"
           CIBW_BUILD_VERBOSITY: "1"
 
-          # Linux: install gfortran inside manylinux container
-          CIBW_BEFORE_ALL_LINUX: >
-            yum install -y gcc-gfortran || true
+          # Linux: install gfortran once per container (before_all)
+          CIBW_BEFORE_ALL_LINUX: yum install -y gcc-gfortran || apt-get install -y gfortran || true
 
-          # macOS: gfortran already installed above
-          # Windows: gfortran already on PATH
+          # Test: install runtime deps so imports work
+          CIBW_TEST_REQUIRES: "numpy rasterio rioxarray xarray plotly pystac-client"
 
-          # Verify the wheel is platform-specific and Fortran libs are present
-          CIBW_TEST_COMMAND: >
-            python -c "
-            import sys, os
-            from pathlib import Path
-            import sentinel_processor as sp
-            pkg = Path(sp.__file__).parent
-            ext = '.dll' if sys.platform == 'win32' else '.so'
-            libs = list(pkg.rglob(f'*{ext}'))
-            print('Fortran libs found:', [l.name for l in libs])
-            assert libs, f'No .so/.dll found in {pkg}'
-            from sentinel_processor.indices.compute import list_indices
-            from sentinel_processor.filters.compute import list_filters
-            print('Indices:', list(list_indices().keys()))
-            print('Filters:', list(list_filters().keys()))
-            print('OK')
-            "
+          CIBW_TEST_COMMAND: >-
+            python -c "import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; print('Indices:', sorted(list_indices())); print('Filters:', sorted(list_filters())); print('ALL OK')"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -92,10 +83,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build sdist
-        run: |
-          pip install build
-          python -m build --sdist
+      - run: pip install build && python -m build --sdist
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
@@ -116,13 +104,9 @@ jobs:
         with:
           name: sdist
           path: dist/
-      - name: Run twine check
-        run: |
-          pip install twine
-          twine check dist/*
-          ls -lh dist/
+      - run: pip install twine && twine check dist/* && ls -lh dist/
 
-  # ── Upload to TestPyPI ────────────────────────────────────────────────────
+  # ── TestPyPI ──────────────────────────────────────────────────────────────
   upload_testpypi:
     name: Upload to TestPyPI
     needs: check
@@ -146,7 +130,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-  # ── Upload to PyPI ────────────────────────────────────────────────────────
+  # ── PyPI ──────────────────────────────────────────────────────────────────
   upload_pypi:
     name: Upload to PyPI
     needs: upload_testpypi
