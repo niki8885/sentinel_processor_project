@@ -1,6 +1,7 @@
 LICENSE.md
 README.md
 pyproject.toml
+setup.py
 sentinel_processor/__init__.py
 sentinel_processor/config.py
 sentinel_processor.egg-info/PKG-INFO

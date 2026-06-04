@@ -14,8 +14,8 @@ keywords = ["sentinel-2", "remote-sensing", "satellite", "stac", "rasterio", "pl
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Topic :: Scientific/Engineering :: GIS",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-netcdf = ["netCDF4>=1.6"]
+netcdf  = ["netCDF4>=1.6"]
 shapely = ["shapely>=2.0"]
 postgis = ["geoalchemy2>=0.14", "shapely>=2.0"]
 dev = [
@@ -43,27 +43,39 @@ dev = [
 all = ["netCDF4>=1.6", "shapely>=2.0", "geoalchemy2>=0.14"]
 
 [project.urls]
-Repository = "https://github.com/niki8885/sentinel-processor"
+Repository    = "https://github.com/niki8885/sentinel-processor"
 Documentation = "https://github.com/niki8885/sentinel-processor/tree/master/docs"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where   = ["."]
 include = ["sentinel_processor*"]
 
 [tool.setuptools.package-data]
 sentinel_processor = [
     "validation/fortran/*.f90",
-    "validation/fortran/*.dll",
-    "validation/fortran/*.so",
     "indices/fortran/*.f90",
-    "indices/fortran/*.dll",
-    "indices/fortran/*.so",
     "processing/fortran/*.f90",
-    "processing/fortran/*.dll",
-    "processing/fortran/*.so",
     "filters/fortran/*.f90",
-    "filters/fortran/*.dll",
+    "validation/fortran/*.so",
+    "validation/fortran/*.dll",
+    "indices/fortran/*.so",
+    "indices/fortran/*.dll",
+    "processing/fortran/*.so",
+    "processing/fortran/*.dll",
     "filters/fortran/*.so",
+    "filters/fortran/*.dll",
+    "validation/fortran/libgfortran*.dll",
+    "validation/fortran/libgcc*.dll",
+    "validation/fortran/libwinpthread*.dll",
+    "indices/fortran/libgfortran*.dll",
+    "indices/fortran/libgcc*.dll",
+    "indices/fortran/libwinpthread*.dll",
+    "processing/fortran/libgfortran*.dll",
+    "processing/fortran/libgcc*.dll",
+    "processing/fortran/libwinpthread*.dll",
+    "filters/fortran/libgfortran*.dll",
+    "filters/fortran/libgcc*.dll",
+    "filters/fortran/libwinpthread*.dll",
 ]
 
 [tool.pytest.ini_options]
