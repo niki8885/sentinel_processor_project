@@ -1,0 +1,4 @@
+numpy==2.4.6
+pytest==9.0.3
+rasterio==1.5.0
+sentinel_processor==0.1.0

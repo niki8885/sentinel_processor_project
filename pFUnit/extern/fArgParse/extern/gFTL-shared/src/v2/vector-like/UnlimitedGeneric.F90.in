@@ -1,0 +1,13 @@
+module gFTL2_Unlimited@Container@
+
+#define T __UNLIMITED_POLYMORPHIC
+#define @Container@ Unlimited@Container@
+#define @Container@Iterator Unlimited@Container@Iterator
+#define @Container@RIterator Unlimited@Container@RIterator
+#include "@container@/template.inc"
+#undef @Container@RIterator
+#undef @Container@Iterator
+#undef @Container@
+#undef T
+  
+end module gFTL2_Unlimited@Container@

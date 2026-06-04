@@ -1,0 +1,3 @@
+[submodule "gFTL-shared"]
+	path = extern/gFTL-shared
+	url = https://github.com/Goddard-Fortran-Ecosystem/gFTL-shared.git

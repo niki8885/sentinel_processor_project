@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentinel-processor"
@@ -36,6 +36,7 @@ shapely = ["shapely>=2.0"]
 postgis = ["geoalchemy2>=0.14", "shapely>=2.0"]
 dev = [
     "pytest>=7.0",
+    "pytest-cov>=4.0",
     "netCDF4>=1.6",
 ]
 all = ["netCDF4>=1.6", "shapely>=2.0", "geoalchemy2>=0.14"]
@@ -51,5 +52,35 @@ include = ["sentinel_processor*"]
 [tool.setuptools.package-data]
 sentinel_processor = [
     "validation/fortran/*.f90",
+    "validation/fortran/*.dll",
+    "validation/fortran/*.so",
     "indices/fortran/*.f90",
+    "indices/fortran/*.dll",
+    "indices/fortran/*.so",
+    "processing/fortran/*.f90",
+    "processing/fortran/*.dll",
+    "processing/fortran/*.so",
+    "filters/fortran/*.f90",
+    "filters/fortran/*.dll",
+    "filters/fortran/*.so",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
+markers   = [
+    "slow:        mark test as slow (> 1 s)",
+    "fortran:     requires compiled Fortran shared library",
+    "integration: writes/reads real files via rasterio",
+]
+
+[tool.coverage.run]
+source = ["sentinel_processor"]
+omit   = ["*/fortran/*", "*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise FileNotFoundError",
+    "if __name__ == .__main__.:",
 ]
