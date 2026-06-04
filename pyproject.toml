@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentinel-processor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, and Plotly visualisation"
 readme = "README.md"
 license = {file = "LICENSE.md"}
