@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
@@ -33,28 +33,17 @@ jobs:
           cache: pip
 
       # gfortran Linux
-      - name: Install gfortran (Linux)
-        if: runner.os == 'Linux'
+      - name: Install gfortran
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y gfortran
-
-      # gfortran Windows (MSYS2 UCRT64)
-      - name: Install gfortran (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: mingw-w64-ucrt-x86_64-gcc-fortran
 
       # Python deps
       - name: Install Python dependencies
         run: pip install -e ".[dev,netcdf]"
 
       # Compile Fortran Linux
-      - name: Compile Fortran libraries (Linux)
-        if: runner.os == 'Linux'
+      - name: Compile Fortran libraries
         run: |
           set -e
           compile() { gfortran -O2 -shared -fPIC -o "$1" "$2"; }
@@ -74,40 +63,6 @@ jobs:
           compile sentinel_processor/filters/fortran/libsentinel_filters.so \
                    sentinel_processor/filters/fortran/filters.f90
 
-      # Compile Fortran Windows
-      - name: Compile Fortran libraries (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          set -e
-          compile() { gfortran -O2 -shared -o "$1" "$2"; }
-
-          compile sentinel_processor/validation/fortran/libsentinel_validation.dll \
-                   sentinel_processor/validation/fortran/validation.f90
-
-          compile sentinel_processor/indices/fortran/libsentinel_indices.dll \
-                   sentinel_processor/indices/fortran/indices_mod.f90
-
-          compile sentinel_processor/processing/fortran/libsentinel_raster_ops.dll \
-                   sentinel_processor/processing/fortran/raster_ops.f90
-
-          compile sentinel_processor/processing/fortran/libsentinel_processing.dll \
-                   sentinel_processor/processing/fortran/pansharpening.f90
-
-          compile sentinel_processor/filters/fortran/libsentinel_filters.dll \
-                   sentinel_processor/filters/fortran/filters.f90
-
-      # Copy MSYS2 runtime DLLs Windows
-      - name: Copy MSYS2 runtime DLLs (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          for dir in validation indices processing filters; do
-            cp /ucrt64/bin/libgfortran-5.dll   sentinel_processor/$dir/fortran/ 2>/dev/null || true
-            cp /ucrt64/bin/libgcc_s_seh-1.dll  sentinel_processor/$dir/fortran/ 2>/dev/null || true
-            cp /ucrt64/bin/libwinpthread-1.dll  sentinel_processor/$dir/fortran/ 2>/dev/null || true
-          done
-
       # Tests
       - name: Run tests
         run: >-
@@ -118,7 +73,7 @@ jobs:
 
       # Upload coverage (Linux / Python 3.12 only)
       - name: Upload coverage to Codecov
-        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

@@ -26,3 +26,6 @@ __pycache__/
 build/
 dist/
 pFUnit/
+
+# Logs
+*.json
