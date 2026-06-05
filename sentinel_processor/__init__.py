@@ -14,6 +14,11 @@ from sentinel_processor.validation._fortran_bridge import (
     call_validate_scl,
     validate_file,
 )
+from sentinel_processor.input.timeseries import (
+    stack_timeseries,
+    TimeSeriesConfig,
+    StackResult,
+)
 
 __all__ = [
     # download
@@ -28,4 +33,8 @@ __all__ = [
     "call_validate_scl",
     "call_check_radiometry",
     "validate_file",
+    # timeseries
+    "stack_timeseries",
+    "TimeSeriesConfig",
+    "StackResult",
 ]
