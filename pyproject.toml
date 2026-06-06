@@ -66,6 +66,8 @@ sentinel_processor = [
     "indices/fortran/*.dll",
     "processing/fortran/*.so",
     "processing/fortran/*.dll",
+    "processing/fortran/libsentinel_timeseries*.so",
+    "processing/fortran/libsentinel_timeseries*.dll",
     "filters/fortran/*.so",
     "filters/fortran/*.dll",
     # MSYS2 runtime DLLs bundled on Windows

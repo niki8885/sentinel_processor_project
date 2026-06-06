@@ -2,7 +2,7 @@
 
 Sentinel-2 L2A downloader and processing toolkit built on the [Element84 STAC API](https://earth-search.aws.element84.com/v1).
 
-Downloads spectral bands, quality layers, and visual overviews for any coordinate. Validation, spectral index computation, convolution filters, and pansharpening are all backed by compiled Fortran kernels — Python handles I/O and orchestration, Fortran handles the pixels.
+Downloads spectral bands, quality layers, and visual overviews for any coordinate. Validation, spectral index computation, convolution filters, pansharpening, and time-series stacking are all backed by compiled Fortran kernels — Python handles I/O and orchestration, Fortran handles the pixels.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z01TOFUW)
 [![PyPI](https://img.shields.io/pypi/v/sentinel-processor)](https://pypi.org/project/sentinel-processor/)
@@ -20,6 +20,8 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 | **Indices** | 10 spectral indices: NDVI, EVI, SAVI, NDWI, MNDWI, NDBI, NBR, NDSI, CIG, ARVI (Fortran) |
 | **Filters** | 14 convolution and morphological filters: Gaussian, bilateral, Sobel, Laplacian, unsharp mask, median, erosion, dilation, top-hat, arbitrary kernel (Fortran) |
 | **Pansharpening** | Gram-Schmidt, IHS, Wavelet — inject PAN detail into MS bands (Fortran) |
+| **Time series** | Quality-filtered temporal stack builder with cloud/snow filtering, alignment, and save (Fortran validation + raster ops) |
+| **Gap filling** | Fill cloud-masked holes in time stacks: linear, Savitzky-Golay, PCHIP, Holt ETS, Gaussian (Fortran) |
 | **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, grid, SCL mask |
 
 ---
@@ -44,7 +46,7 @@ pip install "sentinel-processor[all]"
 
 ### Fortran libraries
 
-The Fortran kernels must be compiled once before validation, indices, filters, and pansharpening are available. Without them, set `validate=False` and skip `compute_indices` / `apply_filter` — the downloader works normally regardless.
+The Fortran kernels must be compiled once before validation, indices, filters, pansharpening, and time-series alignment are available. Without them the downloader still works; set `validate=False` and skip Fortran-dependent calls.
 
 **Linux / macOS**
 ```bash
@@ -65,6 +67,10 @@ gfortran -O2 -shared -fPIC \
   sentinel_processor/processing/fortran/pansharpening.f90
 
 gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/processing/fortran/libsentinel_timeseries.so \
+  sentinel_processor/processing/fortran/timeseries_mod.f90
+
+gfortran -O2 -shared -fPIC \
   -o sentinel_processor/filters/fortran/libsentinel_filters.so \
   sentinel_processor/filters/fortran/filters.f90
 ```
@@ -76,6 +82,7 @@ gfortran -O2 -shared -o sentinel_processor\validation\fortran\libsentinel_valida
 gfortran -O2 -shared -o sentinel_processor\indices\fortran\libsentinel_indices.dll sentinel_processor\indices\fortran\indices_mod.f90
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_raster_ops.dll sentinel_processor\processing\fortran\raster_ops.f90
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_processing.dll sentinel_processor\processing\fortran\pansharpening.f90
+gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_timeseries.dll sentinel_processor\processing\fortran\timeseries_mod.f90
 gfortran -O2 -shared -o sentinel_processor\filters\fortran\libsentinel_filters.dll sentinel_processor\filters\fortran\filters.f90
 ```
 
@@ -97,11 +104,17 @@ for %d in (validation indices processing filters) do (
 import sentinel_processor as sp
 from sentinel_processor.indices.compute import compute_indices
 from sentinel_processor.filters import apply_filter
+from sentinel_processor.input.timeseries import stack_timeseries, TimeSeriesConfig
 from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask
+from pathlib import Path
 
 # 1. Download
 results = sp.download_sentinel2(
     [sp.LocationSpec(lat=47.56, lon=19.17, name="budapest")],
+    cfg=sp.DownloadConfig(
+        keep_items  = 10,
+        save_report = True,   # enables fast sidecar path in stack_timeseries
+    ),
 )
 
 scene = "data/spectral/budapest_20260526T095725.nc"
@@ -114,11 +127,34 @@ idx = compute_indices(scene, ["ndvi", "ndwi", "ndbi"])
 # 3. Filters
 import rioxarray
 nir = rioxarray.open_rasterio(scene).sel(band="nir").squeeze().values
-nir_smooth  = apply_filter(nir, "bilateral",     sigma_s=2.0, sigma_r=0.08)
-nir_edges   = apply_filter(nir, "sobel_magnitude")
-nir_sharp   = apply_filter(nir, "unsharp_mask",  sigma=1.5, amount=1.2)
+nir_smooth = apply_filter(nir, "bilateral",      sigma_s=2.0, sigma_r=0.08)
+nir_edges  = apply_filter(nir, "sobel_magnitude")
+nir_sharp  = apply_filter(nir, "unsharp_mask",   sigma=1.5, amount=1.2)
 
-# 4. Visualise
+# 4. Time series stack
+result = stack_timeseries(
+    sources = sorted(Path("data/spectral").glob("budapest_*.nc")),
+    scl_dir = "data/technical",
+    cfg = TimeSeriesConfig(
+        max_cloud_fraction = 0.10,
+        min_confidence     = 0.75,
+        save_dir           = "data/stacks",
+    ),
+)
+print(result.summary())
+da = result.stack   # xr.DataArray  (time, band, y, x)  float32
+
+# 5. Gap filling
+import numpy as np
+from sentinel_processor.processing._timeseries_bridge import interpolate_gaps
+
+arr  = da.values.astype(np.float64)
+mask = np.isfinite(arr).astype(np.int32)
+filled = np.empty_like(arr)
+for b in range(arr.shape[1]):
+    filled[:, b] = interpolate_gaps(arr[:, b], mask[:, b], method="pchip")
+
+# 6. Visualise
 plot_rgb(vis).show()
 plot_band(idx["ndvi"], colorscale="RdYlGn").show()
 plot_mask(scl).show()
@@ -140,6 +176,8 @@ plot_grid([
 | `sentinel_processor.indices` | Spectral index computation (Fortran) | [INDICES.md](docs/INDICES.md) |
 | `sentinel_processor.filters` | Convolution and morphological filters (Fortran) | [FILTERS.md](docs/FILTERS.md) |
 | `sentinel_processor.processing` | Pansharpening + raster ops (Fortran) | [PANSHARPENING.md](docs/PANSHARPENING.md) · [RASTER_OPS.md](docs/RASTER_OPS.md) |
+| `sentinel_processor.input.timeseries` | Quality-filtered temporal stack builder | [TIMESERIES.md](docs/TIMESERIES.md) |
+| `sentinel_processor.processing._timeseries_bridge` | Gap filling for time stacks (Fortran) | [TIMESERIES.md](docs/TIMESERIES.md#gap-filling) |
 | `sentinel_processor.visualisation` | Interactive Plotly figures | [VISUALISATION.md](docs/VISUALISATION.md) |
 
 ---
@@ -174,12 +212,93 @@ cfg = sp.DownloadConfig(
     keep_items          = 3,
     max_cloud_threshold = 0.15,
     min_confidence      = 0.75,
+    save_report         = True,
 )
 results = sp.download_sentinel2(
     [sp.LocationSpec(lat=47.56, lon=19.17, name="budapest")],
     cfg=cfg,
 )
 ```
+
+### Time series
+
+Build a quality-filtered temporal stack from any number of downloaded scenes.
+
+```python
+from pathlib import Path
+from sentinel_processor.input.timeseries import stack_timeseries, TimeSeriesConfig
+
+result = stack_timeseries(
+    sources = sorted(Path("data/spectral").glob("budapest_*.nc")),
+    scl_dir = "data/technical",
+    cfg = TimeSeriesConfig(
+        max_cloud_fraction = 0.10,   # same scale as DownloadConfig.max_cloud_threshold
+        min_confidence     = 0.75,
+        require_bands      = ["red", "nir"],   # reject scenes missing these bands
+        save_dir           = "data/stacks",    # auto-save on completion
+    ),
+)
+print(result.summary())    # per-scene quality table
+da = result.stack          # xr.DataArray (time, band, y, x) float32
+```
+
+**Quality pipeline** — identical thresholds to the downloader:
+
+```
+sidecar *_report.json   ← fast path when save_report=True in DownloadConfig
+    │  not found ↓
+SCL file  →  check_dimensions → validate_scl → check_radiometry  (Fortran)
+    │
+    └── apply TimeSeriesConfig thresholds → accept or reject scene
+```
+
+**Save options:**
+
+```python
+# Single NetCDF-4 (default)
+result.save("data/stacks", fmt="nc")        # → data/stacks/budapest_stack.nc
+
+# One GeoTIFF per time step
+result.save("data/stacks", fmt="tif")       # → data/stacks/budapest_stack_20260520T094746.tif …
+
+# Explicit name
+result.save("data/stacks", name="may_2026", fmt="nc")
+
+# Auto-save via config
+cfg = TimeSeriesConfig(save_dir="data/stacks", save_format="nc", save_name="may_2026")
+```
+
+**Keep rejected scenes as nodata to preserve a contiguous time axis:**
+
+```python
+cfg = TimeSeriesConfig(max_cloud_fraction=0.10, fill_rejected=True)
+result = stack_timeseries(sources, scl_dir="data/technical", cfg=cfg)
+# result.stack.shape[0] == total scenes including rejected (filled with NaN)
+```
+
+### Gap filling
+
+Fill cloud-masked holes in the stack using Fortran-accelerated interpolation.
+
+```python
+import numpy as np
+from sentinel_processor.processing._timeseries_bridge import interpolate_gaps
+
+arr  = result.stack.values.astype(np.float64)  # (time, band, y, x)
+mask = np.isfinite(arr).astype(np.int32)        # 1 = valid, 0 = gap
+
+filled = np.empty_like(arr)
+for b in range(arr.shape[1]):
+    filled[:, b] = interpolate_gaps(arr[:, b], mask[:, b], method="pchip")
+```
+
+| `method` | Best for |
+|---|---|
+| `"linear"` | Short gaps, fast baseline |
+| `"savgol"` | Noisy series, preserves peaks (use `window=5..11`) |
+| `"pchip"` | NDVI / EVI / LAI — monotone cubic, no overshoot |
+| `"ets"` | Series with persistent seasonal trend |
+| `"gauss"` | Smooth phenology curves (use `window=9..15`) |
 
 ### Spectral indices
 
@@ -277,15 +396,17 @@ plot_grid([
 ├── spectral/
 │   ├── <name>_<timestamp>.tif
 │   ├── <name>_<timestamp>.nc            ← requires [netcdf]
-│   ├── <name>_<timestamp>_report.json
+│   ├── <name>_<timestamp>_report.json   ← if save_report=True
 │   └── indices/
 │       └── indices_<name>_<timestamp>_<index>.tif
 ├── technical/
 │   ├── scl_<name>_<timestamp>.tif/.nc
 │   ├── aot_<name>_<timestamp>.tif/.nc
 │   └── wvp_<name>_<timestamp>.tif/.nc
-└── visual/
-    └── vis_<name>_<timestamp>.tif/.nc
+├── visual/
+│   └── vis_<name>_<timestamp>.tif/.nc
+└── stacks/                              ← written by stack_timeseries
+    └── <name>_stack.nc / <name>_stack_<timestamp>.tif
 ```
 
 ---
@@ -325,17 +446,24 @@ sentinel_processor/
 │   ├── compute.py
 │   └── fortran/indices_mod.f90
 ├── input/
-│   └── downloader.py
+│   ├── __init__.py
+│   ├── downloader.py
+│   └── timeseries.py
 ├── processing/
+│   ├── __init__.py
 │   ├── _fortran_bridge.py
 │   ├── _raster_ops_bridge.py
-│   └── fortran/pansharpening.f90 · raster_ops.f90
+│   ├── _timeseries_bridge.py
+│   └── fortran/pansharpening.f90 · raster_ops.f90 · timeseries_mod.f90
 ├── utils/
+│   ├── __init__.py
 │   └── data_utils.py
 ├── validation/
+│   ├── __init__.py
 │   ├── _fortran_bridge.py
 │   └── fortran/validation.f90
 └── visualisation/
+    ├── __init__.py
     └── plot.py
 
 tests/
@@ -344,6 +472,8 @@ tests/
 ├── test_indices.py
 ├── test_filters.py
 ├── test_processing.py
+├── test_timeseries.py
+├── test_timeseries_bridge.py
 └── test_visualisation.py
 
 docs/
@@ -353,6 +483,7 @@ docs/
 ├── FILTERS.md
 ├── PANSHARPENING.md
 ├── RASTER_OPS.md
+├── TIMESERIES.md
 └── VISUALISATION.md
 ```
 
@@ -365,6 +496,12 @@ git clone https://github.com/niki8885/sentinel-processor
 cd sentinel-processor
 pip install -e ".[dev,netcdf]"
 pytest tests/ -v
+```
+
+Run only fast unit tests (no I/O, no Fortran required):
+
+```bash
+pytest tests/ -m "not integration and not fortran" -v
 ```
 
 See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for full contribution guidelines.
