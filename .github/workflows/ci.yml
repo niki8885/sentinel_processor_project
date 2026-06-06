@@ -60,6 +60,9 @@ jobs:
           compile sentinel_processor/processing/fortran/libsentinel_processing.so \
                    sentinel_processor/processing/fortran/pansharpening.f90
 
+          compile sentinel_processor/processing/fortran/libsentinel_timeseries.so \
+                   sentinel_processor/processing/fortran/timeseries_mod.f90
+
           compile sentinel_processor/filters/fortran/libsentinel_filters.so \
                    sentinel_processor/filters/fortran/filters.f90
 

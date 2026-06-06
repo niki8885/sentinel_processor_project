@@ -21,6 +21,7 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 | **Filters** | 14 convolution and morphological filters: Gaussian, bilateral, Sobel, Laplacian, unsharp mask, median, erosion, dilation, top-hat, arbitrary kernel (Fortran) |
 | **Pansharpening** | Gram-Schmidt, IHS, Wavelet — inject PAN detail into MS bands (Fortran) |
 | **Time series** | Quality-filtered temporal stack builder with cloud/snow filtering, alignment, and save (Fortran validation + raster ops) |
+| **Gap filling** | Fill cloud-masked holes in time stacks: linear, Savitzky-Golay, PCHIP, Holt ETS, Gaussian (Fortran) |
 | **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, grid, SCL mask |
 
 ---
@@ -66,6 +67,10 @@ gfortran -O2 -shared -fPIC \
   sentinel_processor/processing/fortran/pansharpening.f90
 
 gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/processing/fortran/libsentinel_timeseries.so \
+  sentinel_processor/processing/fortran/timeseries_mod.f90
+
+gfortran -O2 -shared -fPIC \
   -o sentinel_processor/filters/fortran/libsentinel_filters.so \
   sentinel_processor/filters/fortran/filters.f90
 ```
@@ -77,6 +82,7 @@ gfortran -O2 -shared -o sentinel_processor\validation\fortran\libsentinel_valida
 gfortran -O2 -shared -o sentinel_processor\indices\fortran\libsentinel_indices.dll sentinel_processor\indices\fortran\indices_mod.f90
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_raster_ops.dll sentinel_processor\processing\fortran\raster_ops.f90
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_processing.dll sentinel_processor\processing\fortran\pansharpening.f90
+gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_timeseries.dll sentinel_processor\processing\fortran\timeseries_mod.f90
 gfortran -O2 -shared -o sentinel_processor\filters\fortran\libsentinel_filters.dll sentinel_processor\filters\fortran\filters.f90
 ```
 
@@ -138,7 +144,17 @@ result = stack_timeseries(
 print(result.summary())
 da = result.stack   # xr.DataArray  (time, band, y, x)  float32
 
-# 5. Visualise
+# 5. Gap filling
+import numpy as np
+from sentinel_processor.processing._timeseries_bridge import interpolate_gaps
+
+arr  = da.values.astype(np.float64)
+mask = np.isfinite(arr).astype(np.int32)
+filled = np.empty_like(arr)
+for b in range(arr.shape[1]):
+    filled[:, b] = interpolate_gaps(arr[:, b], mask[:, b], method="pchip")
+
+# 6. Visualise
 plot_rgb(vis).show()
 plot_band(idx["ndvi"], colorscale="RdYlGn").show()
 plot_mask(scl).show()
@@ -161,6 +177,7 @@ plot_grid([
 | `sentinel_processor.filters` | Convolution and morphological filters (Fortran) | [FILTERS.md](docs/FILTERS.md) |
 | `sentinel_processor.processing` | Pansharpening + raster ops (Fortran) | [PANSHARPENING.md](docs/PANSHARPENING.md) · [RASTER_OPS.md](docs/RASTER_OPS.md) |
 | `sentinel_processor.input.timeseries` | Quality-filtered temporal stack builder | [TIMESERIES.md](docs/TIMESERIES.md) |
+| `sentinel_processor.processing._timeseries_bridge` | Gap filling for time stacks (Fortran) | [TIMESERIES.md](docs/TIMESERIES.md#gap-filling) |
 | `sentinel_processor.visualisation` | Interactive Plotly figures | [VISUALISATION.md](docs/VISUALISATION.md) |
 
 ---
@@ -258,6 +275,30 @@ cfg = TimeSeriesConfig(max_cloud_fraction=0.10, fill_rejected=True)
 result = stack_timeseries(sources, scl_dir="data/technical", cfg=cfg)
 # result.stack.shape[0] == total scenes including rejected (filled with NaN)
 ```
+
+### Gap filling
+
+Fill cloud-masked holes in the stack using Fortran-accelerated interpolation.
+
+```python
+import numpy as np
+from sentinel_processor.processing._timeseries_bridge import interpolate_gaps
+
+arr  = result.stack.values.astype(np.float64)  # (time, band, y, x)
+mask = np.isfinite(arr).astype(np.int32)        # 1 = valid, 0 = gap
+
+filled = np.empty_like(arr)
+for b in range(arr.shape[1]):
+    filled[:, b] = interpolate_gaps(arr[:, b], mask[:, b], method="pchip")
+```
+
+| `method` | Best for |
+|---|---|
+| `"linear"` | Short gaps, fast baseline |
+| `"savgol"` | Noisy series, preserves peaks (use `window=5..11`) |
+| `"pchip"` | NDVI / EVI / LAI — monotone cubic, no overshoot |
+| `"ets"` | Series with persistent seasonal trend |
+| `"gauss"` | Smooth phenology curves (use `window=9..15`) |
 
 ### Spectral indices
 
@@ -412,7 +453,8 @@ sentinel_processor/
 │   ├── __init__.py
 │   ├── _fortran_bridge.py
 │   ├── _raster_ops_bridge.py
-│   └── fortran/pansharpening.f90 · raster_ops.f90
+│   ├── _timeseries_bridge.py
+│   └── fortran/pansharpening.f90 · raster_ops.f90 · timeseries_mod.f90
 ├── utils/
 │   ├── __init__.py
 │   └── data_utils.py
@@ -431,6 +473,7 @@ tests/
 ├── test_filters.py
 ├── test_processing.py
 ├── test_timeseries.py
+├── test_timeseries_bridge.py
 └── test_visualisation.py
 
 docs/

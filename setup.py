@@ -14,6 +14,7 @@ _TARGETS = [
     ("sentinel_processor/indices/fortran",      "indices_mod.f90",   "libsentinel_indices"),
     ("sentinel_processor/processing/fortran",   "raster_ops.f90",    "libsentinel_raster_ops"),
     ("sentinel_processor/processing/fortran",   "pansharpening.f90", "libsentinel_processing"),
+    ("sentinel_processor/processing/fortran",   "timeseries_mod.f90","libsentinel_timeseries"),
     ("sentinel_processor/filters/fortran",      "filters.f90",       "libsentinel_filters"),
 ]
 
