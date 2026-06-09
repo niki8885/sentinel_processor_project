@@ -243,8 +243,6 @@ class TestARVI:
         np.testing.assert_allclose(result, expected, atol=1e-9)
 
 
-# compute.py
-
 class TestBandAliases:
 
     def test_human_names_resolve(self):
@@ -352,7 +350,6 @@ class TestComputeIndices:
             compute_indices(str(f), ["ndvi"])
 
     def test_tif_with_named_bands(self, tmp_path):
-        """End-to-end: write a 2-band GeoTIFF, compute NDVI, check output."""
         pytest.importorskip("rioxarray")
         pytest.importorskip("rasterio")
         import rasterio
@@ -377,7 +374,6 @@ class TestComputeIndices:
         assert isinstance(result, dict)
 
     def test_overwrite_false_skips_existing(self, tmp_path):
-        """When overwrite=False and output exists, it must be in results."""
         pytest.importorskip("rioxarray")
         pytest.importorskip("rasterio")
         import rasterio
