@@ -22,6 +22,7 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 | **Pansharpening** | Gram-Schmidt, IHS, Wavelet — inject PAN detail into MS bands (Fortran) |
 | **Time series** | Quality-filtered temporal stack builder with cloud/snow filtering, alignment, and save (Fortran validation + raster ops) |
 | **Gap filling** | Fill cloud-masked holes in time stacks: linear, Savitzky-Golay, PCHIP, Holt ETS, Gaussian (Fortran) |
+| **Analysis** | 14 per-pixel temporal statistics: coverage, gap stats, quantiles, IQR outlier mask, rolling mean/std/slope, z-score anomaly, Mann-Kendall trend test, Theil-Sen robust slope, BFAST structural break, OLS regression with R², phenology (SOS/EOS/peak), Pearson correlation (Fortran) |
 | **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, grid, SCL mask |
 
 ---
@@ -73,6 +74,10 @@ gfortran -O2 -shared -fPIC \
 gfortran -O2 -shared -fPIC \
   -o sentinel_processor/filters/fortran/libsentinel_filters.so \
   sentinel_processor/filters/fortran/filters.f90
+
+gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/analysis/fortran/libsentinel_stats.so \
+  sentinel_processor/analysis/fortran/sentinel_stats.f90
 ```
 
 **Windows** (MSYS2 UCRT64 — do **not** use `-static-libgfortran` on GCC 16+)
@@ -84,12 +89,13 @@ gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_raster
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_processing.dll sentinel_processor\processing\fortran\pansharpening.f90
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_timeseries.dll sentinel_processor\processing\fortran\timeseries_mod.f90
 gfortran -O2 -shared -o sentinel_processor\filters\fortran\libsentinel_filters.dll sentinel_processor\filters\fortran\filters.f90
+gfortran -O2 -shared -o sentinel_processor\analysis\fortran\libsentinel_stats.dll sentinel_processor\analysis\fortran\sentinel_stats.f90
 ```
 
 After compiling on Windows, copy the MSYS2 runtime DLLs next to each `.dll`:
 
 ```bat
-for %d in (validation indices processing filters) do (
+for %d in (validation indices processing filters analysis) do (
   copy C:\msys64\ucrt64\bin\libgfortran-5.dll    sentinel_processor\%d\fortran\
   copy C:\msys64\ucrt64\bin\libgcc_s_seh-1.dll   sentinel_processor\%d\fortran\
   copy C:\msys64\ucrt64\bin\libwinpthread-1.dll   sentinel_processor\%d\fortran\
@@ -147,6 +153,10 @@ da = result.stack   # xr.DataArray  (time, band, y, x)  float32
 # 5. Gap filling
 import numpy as np
 from sentinel_processor.processing._timeseries_bridge import interpolate_gaps
+from sentinel_processor.analysis._sentinel_stats_bridge import (
+    time_window_stats, anomaly_zscore, mann_kendall,
+    phenology_metrics, save_phenology, NODATA,
+)
 
 arr  = da.values.astype(np.float64)
 mask = np.isfinite(arr).astype(np.int32)
@@ -154,7 +164,22 @@ filled = np.empty_like(arr)
 for b in range(arr.shape[1]):
     filled[:, b] = interpolate_gaps(arr[:, b], mask[:, b], method="pchip")
 
-# 6. Visualise
+# 6. Temporal analysis
+nir_idx = list(da.coords["band"].values).index("nir")
+nir     = filled[:, nir_idx]
+dates   = [s.timestamp for s in result.scenes]
+
+mk  = mann_kendall(nir, dates)
+bg  = time_window_stats(nir, dates, window_days=90)
+z   = anomaly_zscore(nir, dates, background=bg)
+
+# NDVI and phenology
+ri      = list(da.coords["band"].values).index("red")
+ndvi    = (nir - filled[:, ri]) / (nir + filled[:, ri] + 1e-9) / 10_000.0
+metrics = phenology_metrics(ndvi, dates)
+save_phenology(metrics, "data/analysis/phenology", crs="EPSG:32633")
+
+# 7. Visualise
 plot_rgb(vis).show()
 plot_band(idx["ndvi"], colorscale="RdYlGn").show()
 plot_mask(scl).show()
@@ -178,6 +203,7 @@ plot_grid([
 | `sentinel_processor.processing` | Pansharpening + raster ops (Fortran) | [PANSHARPENING.md](docs/PANSHARPENING.md) · [RASTER_OPS.md](docs/RASTER_OPS.md) |
 | `sentinel_processor.input.timeseries` | Quality-filtered temporal stack builder | [TIMESERIES.md](docs/TIMESERIES.md) |
 | `sentinel_processor.processing._timeseries_bridge` | Gap filling for time stacks (Fortran) | [TIMESERIES.md](docs/TIMESERIES.md#gap-filling) |
+| `sentinel_processor.analysis` | 14 per-pixel temporal statistics: trend, anomaly, phenology, regression (Fortran) | [ANALYSIS.md](docs/ANALYSIS.md) |
 | `sentinel_processor.visualisation` | Interactive Plotly figures | [VISUALISATION.md](docs/VISUALISATION.md) |
 
 ---
@@ -300,6 +326,49 @@ for b in range(arr.shape[1]):
 | `"ets"` | Series with persistent seasonal trend |
 | `"gauss"` | Smooth phenology curves (use `window=9..15`) |
 
+### Temporal analysis
+
+14 Fortran-accelerated per-pixel statistics on a `(n_times, rows, cols)` stack.
+
+```python
+import numpy as np
+from sentinel_processor.analysis._sentinel_stats_bridge import (
+    valid_obs_count, temporal_gap_stats,
+    time_window_stats, anomaly_zscore,
+    mann_kendall, trend_theil_sen,
+    bfast_breakpoint, pixel_regression,
+    phenology_metrics, save_phenology,
+    pearson_map, NODATA,
+)
+
+dates = [s.timestamp for s in result.scenes]
+
+# coverage and data quality
+oc = valid_obs_count(nir)
+gs = temporal_gap_stats(nir, dates)
+print(f"Mean coverage: {oc['fraction'].mean():.1%}  Max gap: {gs['max_gap'].max():.0f} d")
+
+# rolling statistics + per-scene anomaly z-scores
+bg = time_window_stats(nir, dates, window_days=90)
+z  = anomaly_zscore(nir, dates, background=bg)
+drought = (z < -2.0) & (z != NODATA)   # (n_times, rows, cols)
+
+# trend significance and magnitude
+mk = mann_kendall(nir, dates)
+ts = trend_theil_sen(nir, dates)
+print(f"Increasing pixels: {(mk['trend'] == 1.0).sum():,}")
+
+# structural break detection (fire, deforestation)
+bp = bfast_breakpoint(nir, dates)
+disturbed = (bp["rss_ratio"] < 0.7) & (bp["magnitude"] < -0.05)
+
+# phenology from NDVI (normalised [0, 1])
+metrics = phenology_metrics(ndvi, dates, smooth=True)
+saved   = save_phenology(metrics, "data/analysis/phenology", crs="EPSG:32633")
+```
+
+See [ANALYSIS.md](docs/ANALYSIS.md) for full API reference, method selection guide, and all 14 functions.
+
 ### Spectral indices
 
 ```python
@@ -407,6 +476,11 @@ plot_grid([
 │   └── vis_<name>_<timestamp>.tif/.nc
 └── stacks/                              ← written by stack_timeseries
     └── <name>_stack.nc / <name>_stack_<timestamp>.tif
+analysis_output/                         ← written by analysis functions
+    ├── coverage.tif · max_gap.tif · slope_*.tif · r2_*.tif
+    ├── mk_trend_*.tif · pearson_*.tif
+    └── phenology/
+        └── sos_doy.tif · eos_doy.tif · peak_doy.tif · peak_val.tif
 ```
 
 ---
@@ -435,6 +509,10 @@ Custom list: `DownloadConfig(bands=["red", "nir", "swir16"])`
 sentinel_processor/
 ├── __init__.py
 ├── config.py
+├── analysis/
+│   ├── __init__.py
+│   ├── _sentinel_stats_bridge.py
+│   └── fortran/sentinel_stats.f90
 ├── filters/
 │   ├── __init__.py
 │   ├── _filters_bridge.py
@@ -468,6 +546,7 @@ sentinel_processor/
 
 tests/
 ├── conftest.py
+├── test_analysis.py
 ├── test_validation.py
 ├── test_indices.py
 ├── test_filters.py
@@ -477,6 +556,7 @@ tests/
 └── test_visualisation.py
 
 docs/
+├── ANALYSIS.md
 ├── DOWNLOADER.md
 ├── VALIDATION.md
 ├── INDICES.md

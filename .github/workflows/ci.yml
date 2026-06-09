@@ -66,6 +66,9 @@ jobs:
           compile sentinel_processor/filters/fortran/libsentinel_filters.so \
                    sentinel_processor/filters/fortran/filters.f90
 
+          compile sentinel_processor/analysis/fortran/libsentinel_stats.so \
+                   sentinel_processor/analysis/fortran/sentinel_stats.f90
+
       # Tests
       - name: Run tests
         run: >-
@@ -109,3 +112,4 @@ jobs:
           python -c "from sentinel_processor.indices.compute   import list_indices"
           python -c "from sentinel_processor.filters.compute   import list_filters"
           python -c "from sentinel_processor.visualisation.plot import plot_band"
+          python -c "from sentinel_processor.analysis._sentinel_stats_bridge import NODATA"
