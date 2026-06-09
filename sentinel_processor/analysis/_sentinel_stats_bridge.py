@@ -13,13 +13,52 @@ _LIB_NAME = (
 )
 _LIB_PATH = Path(__file__).parent / "fortran" / _LIB_NAME
 
-if sys.platform == "win32":
-    import os as _os
 
-    for _d in [r"C:\msys64\ucrt64\bin", r"C:\msys64\mingw64\bin", r"C:\mingw64\bin"]:
-        if _os.path.isdir(_d):
-            _os.add_dll_directory(_d)
-            break
+def _register_dll_directories() -> None:
+    """Add MinGW/MSYS2 runtime directories so Windows can resolve DLL dependencies.
+
+    Searches in order:
+      1. The fortran/ directory itself (the .dll lives there)
+      2. Known MSYS2 / MinGW install locations
+      3. Every directory in PATH that contains gfortran.exe
+    All found directories are registered; execution continues even if none exist.
+    """
+    import os
+    added: list[str] = []
+
+    def _add(path: str) -> None:
+        if os.path.isdir(path) and path not in added:
+            os.add_dll_directory(path)
+            added.append(path)
+
+    _add(str(_LIB_PATH.parent))
+
+    _msys2_roots = [
+        r"C:\msys64", r"C:\msys2",
+        r"D:\msys64", r"D:\msys2",
+    ]
+    _mingw_suffixes = [
+        r"\ucrt64\bin", r"\mingw64\bin", r"\mingw32\bin", r"\clang64\bin",
+    ]
+    _standalone = [
+        r"C:\mingw64\bin", r"C:\mingw32\bin",
+        r"C:\Program Files\mingw-w64\bin",
+        r"C:\Program Files (x86)\mingw-w64\bin",
+    ]
+    for root in _msys2_roots:
+        for suf in _mingw_suffixes:
+            _add(root + suf)
+    for d in _standalone:
+        _add(d)
+
+    import shutil
+    gfc = shutil.which("gfortran")
+    if gfc:
+        _add(os.path.dirname(gfc))
+
+
+if sys.platform == "win32":
+    _register_dll_directories()
 
 NODATA: float = -9999.0
 
@@ -33,14 +72,30 @@ def _get_lib() -> ctypes.CDLL:
     if _lib is not None:
         return _lib
     if not _LIB_PATH.exists():
+        _out = (
+            "sentinel_processor/processing/fortran/libsentinel_stats.dll"
+            if sys.platform == "win32"
+            else "sentinel_processor/processing/fortran/libsentinel_stats.so"
+        )
         raise FileNotFoundError(
             f"Sentinel stats library not found: {_LIB_PATH}\n"
             "Build with:\n"
-            "  gfortran -O2 -shared -fPIC \\\n"
-            "    -o sentinel_processor/processing/fortran/libsentinel_stats.so \\\n"
-            "    sentinel_processor/processing/fortran/sentinel_stats.f90"
+            f"  gfortran -O2 -shared -fPIC -o {_out} sentinel_processor/analysis/fortran/sentinel_stats.f90\n"
+            "Or use the build script:\n"
+            "  python build_sentinel_stats.py"
         )
-    lib = ctypes.CDLL(str(_LIB_PATH))
+    try:
+        lib = ctypes.CDLL(str(_LIB_PATH))
+    except OSError as _e:
+        raise OSError(
+            f"Failed to load {_LIB_PATH}\n"
+            f"Underlying error: {_e}\n"
+            "On Windows this usually means a MinGW runtime DLL is missing.\n"
+            "Fix: ensure gfortran is in PATH, or install MSYS2 ucrt64:\n"
+            "  pacman -S mingw-w64-ucrt-x86_64-gcc-fortran\n"
+            "Then recompile with:\n"
+            "  python build_sentinel_stats.py"
+        ) from _e
 
     def _reg(name: str, *argtypes):
         fn = getattr(lib, name)
@@ -147,6 +202,7 @@ def _buf3(n, r, c) -> np.ndarray:
 
 
 # TypedDict result types
+
 
 class WindowStatsResult(TypedDict):
     mean: np.ndarray  # (rows, cols)
@@ -521,6 +577,7 @@ class PhenologyMetricsResult(TypedDict):
 
 
 # pixel_regression
+
 def pixel_regression(
         y: np.ndarray,
         x: np.ndarray,
@@ -595,6 +652,59 @@ def phenology_metrics(
         falling_pct: int = 20,
         min_valid: int = 5,
 ) -> PhenologyMetricsResult:
+    """Extract per-pixel phenological metrics from a smoothed NDVI stack.
+
+    Implements the TIMESAT convention:
+    * **SOS** — first date the smoothed NDVI crosses *rising_pct* % of the
+      seasonal amplitude above the season minimum.
+    * **EOS** — last date the smoothed NDVI crosses *falling_pct* % of the
+      amplitude above the season minimum (after the peak).
+    * **peak_doy** — day of the global NDVI maximum.
+    * **peak_val** — NDVI value at the peak.
+
+    Parameters
+    ----------
+    ndvi_stack : (n_times, rows, cols) array or xr.DataArray
+        Vegetation index time stack (NDVI, EVI, LAI …).  Values equal to
+        NODATA (-9999) are treated as cloud/missing.
+    dates : list[datetime]
+        Acquisition timestamps, length must equal ``ndvi_stack.shape[0]``.
+    smooth : bool, default True
+        Apply a quadratic Savitzky-Golay smoother (SP-3 kernel from
+        ``sentinel_stats.f90``) before detecting thresholds.
+        Set ``False`` if the stack is already smoothed.
+    savgol_window : int, default 5
+        S-G window width (odd, ≥ 3). Forced odd if even is passed.
+        Ignored when ``smooth=False``.
+    rising_pct : int, default 20
+        SOS threshold as a percentage of seasonal amplitude (TIMESAT default).
+    falling_pct : int, default 20
+        EOS threshold as a percentage of seasonal amplitude.
+    min_valid : int, default 5
+        Pixels with fewer valid (non-NODATA) observations return NODATA in
+        all outputs.  Must be ≥ 5 per SCRUM-207 acceptance criteria.
+
+    Returns
+    -------
+    PhenologyMetricsResult
+        ``sos_doy``  – (rows, cols) start-of-season, fractional days from
+                       ``dates[0]``
+        ``eos_doy``  – (rows, cols) end-of-season, same units
+        ``peak_doy`` – (rows, cols) day of peak
+        ``peak_val`` – (rows, cols) peak index value
+
+        Convert to calendar dates::
+
+            from datetime import timedelta
+            sos_date = dates[0] + timedelta(days=float(metrics["sos_doy"][r, c]))
+
+    Notes
+    -----
+    Pass a gap-filled (not raw) stack for best results.  Cloud gaps produce
+    spurious crossings even after smoothing.  Use ``interpolate_gaps`` from
+    ``timeseries_mod`` or equivalent before calling this function.
+    """
+    # ── coerce xarray → numpy ──────────────────────────────────────────────
     try:
         import xarray as xr
         if isinstance(ndvi_stack, xr.DataArray):
@@ -608,6 +718,7 @@ def phenology_metrics(
         _log.warning("min_valid=%d < 5; overriding to 5 per SCRUM-207 AC", min_valid)
         min_valid = 5
 
+    # S-G window
     if savgol_window < 3:
         savgol_window = 3
     if savgol_window % 2 == 0:
@@ -616,10 +727,14 @@ def phenology_metrics(
     arr = _c64(ndvi_stack)
     d = np.ascontiguousarray(_days(dates))
 
+    # optional Savitzky-Golay smoothing
+
     if smooth:
         _get_lib().savgol_smooth_stack(
             _ptr(arr), _INT(n), _INT(r), _INT(c), _INT(savgol_window),
         )
+
+    # phenology extraction
 
     sos_buf = _buf2(r, c)
     eos_buf = _buf2(r, c)
