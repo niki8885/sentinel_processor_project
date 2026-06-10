@@ -77,6 +77,13 @@ sentinel_processor = [
     "analysis/fortran/libgfortran*.dll",
     "analysis/fortran/libgcc*.dll",
     "analysis/fortran/libwinpthread*.dll",
+    # Texture module
+    "texture/fortran/*.f90",
+    "texture/fortran/*.so",
+    "texture/fortran/*.dll",
+    "texture/fortran/libgfortran*.dll",
+    "texture/fortran/libgcc*.dll",
+    "texture/fortran/libwinpthread*.dll",
     # MSYS2 runtime DLLs bundled on Windows
     "validation/fortran/libgfortran*.dll",
     "validation/fortran/libgcc*.dll",
