@@ -2,7 +2,7 @@
 
 Sentinel-2 L2A downloader and processing toolkit built on the [Element84 STAC API](https://earth-search.aws.element84.com/v1).
 
-Downloads spectral bands, quality layers, and visual overviews for any coordinate. Validation, spectral index computation, convolution filters, pansharpening, and time-series stacking are all backed by compiled Fortran kernels — Python handles I/O and orchestration, Fortran handles the pixels.
+Downloads spectral bands, quality layers, and visual overviews for any coordinate. Validation, spectral index computation, convolution filters, pansharpening, time-series stacking, and band covariance are all backed by compiled Fortran kernels — Python handles I/O and orchestration, Fortran handles the pixels.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z01TOFUW)
 [![PyPI](https://img.shields.io/pypi/v/sentinel-processor)](https://pypi.org/project/sentinel-processor/)
@@ -24,6 +24,7 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 | **Gap filling** | Fill cloud-masked holes in time stacks: linear, Savitzky-Golay, PCHIP, Holt ETS, Gaussian (Fortran) |
 | **Texture** | GLCM texture features per pixel: energy, contrast, homogeneity — window, distance, and angle-configurable (Fortran) |
 | **Analysis** | 14 per-pixel temporal statistics: coverage, gap stats, quantiles, IQR outlier mask, rolling mean/std/slope, z-score anomaly, Mann-Kendall trend test, Theil-Sen robust slope, BFAST structural break, OLS regression with R², phenology (SOS/EOS/peak), Pearson correlation (Fortran) |
+| **Covariance** | Per-band covariance matrix — single-pass Kahan-compensated algorithm for PCA, feature reduction, and Mahalanobis anomaly detection (Fortran) |
 | **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, grid, SCL mask |
 
 ---
@@ -48,7 +49,7 @@ pip install "sentinel-processor[all]"
 
 ### Fortran libraries
 
-The Fortran kernels must be compiled once before validation, indices, filters, pansharpening, and time-series alignment are available. Without them the downloader still works; set `validate=False` and skip Fortran-dependent calls.
+The Fortran kernels must be compiled once before validation, indices, filters, pansharpening, time-series alignment, and covariance are available. Without them the downloader still works; set `validate=False` and skip Fortran-dependent calls.
 
 **Linux / macOS**
 ```bash
@@ -81,6 +82,10 @@ gfortran -O2 -shared -fPIC \
   sentinel_processor/analysis/fortran/sentinel_stats.f90
 
 gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/analysis/fortran/libband_covariance.so \
+  sentinel_processor/analysis/fortran/band_covariance.f90
+
+gfortran -O2 -shared -fPIC \
   -o sentinel_processor/texture/fortran/libsentinel_texture.so \
   sentinel_processor/texture/fortran/texture_mod.f90
 ```
@@ -95,6 +100,7 @@ gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_proces
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_timeseries.dll sentinel_processor\processing\fortran\timeseries_mod.f90
 gfortran -O2 -shared -o sentinel_processor\filters\fortran\libsentinel_filters.dll sentinel_processor\filters\fortran\filters.f90
 gfortran -O2 -shared -o sentinel_processor\analysis\fortran\libsentinel_stats.dll sentinel_processor\analysis\fortran\sentinel_stats.f90
+gfortran -O2 -shared -o sentinel_processor\analysis\fortran\libband_covariance.dll sentinel_processor\analysis\fortran\band_covariance.f90
 gfortran -O2 -shared -o sentinel_processor\texture\fortran\libsentinel_texture.dll sentinel_processor\texture\fortran\texture_mod.f90
 ```
 
@@ -185,7 +191,16 @@ ndvi    = (nir - filled[:, ri]) / (nir + filled[:, ri] + 1e-9) / 10_000.0
 metrics = phenology_metrics(ndvi, dates)
 save_phenology(metrics, "data/analysis/phenology", crs="EPSG:32633")
 
-# 7. Visualise
+# 7. Per-band covariance → PCA
+from sentinel_processor.analysis._band_covariance_bridge import band_covariance
+
+stack = filled.transpose(1, 0, 2, 3)   # (n_bands, time, rows, cols) → treat time as pixels
+# or pass a single (n_bands, rows, cols) scene cube:
+scene_cube = filled[0]                  # (n_bands, rows, cols)
+cov = band_covariance(scene_cube)       # (n_bands, n_bands)
+eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+# 8. Visualise
 plot_rgb(vis).show()
 plot_band(idx["ndvi"], colorscale="RdYlGn").show()
 plot_mask(scl).show()
@@ -211,6 +226,7 @@ plot_grid([
 | `sentinel_processor.processing._timeseries_bridge` | Gap filling for time stacks (Fortran) | [TIMESERIES.md](docs/TIMESERIES.md#gap-filling) |
 | `sentinel_processor.texture` | GLCM texture features: energy, contrast, homogeneity (Fortran) | [TEXTURE.md](docs/TEXTURE.md) |
 | `sentinel_processor.analysis` | 14 per-pixel temporal statistics: trend, anomaly, phenology, regression (Fortran) | [ANALYSIS.md](docs/ANALYSIS.md) |
+| `sentinel_processor.analysis._band_covariance_bridge` | Per-band covariance matrix for PCA and anomaly detection (Fortran) | [COVARIANCE.md](docs/COVARIANCE.md) |
 | `sentinel_processor.visualisation` | Interactive Plotly figures | [VISUALISATION.md](docs/VISUALISATION.md) |
 
 ---
@@ -376,6 +392,33 @@ saved   = save_phenology(metrics, "data/analysis/phenology", crs="EPSG:32633")
 
 See [ANALYSIS.md](docs/ANALYSIS.md) for full API reference, method selection guide, and all 14 functions.
 
+### Band covariance
+
+Per-band covariance matrix for PCA-based sharpening, feature reduction, and Mahalanobis anomaly detection.
+
+```python
+import numpy as np
+from sentinel_processor.analysis._band_covariance_bridge import band_covariance
+
+# cube: (n_bands, rows, cols) float64
+cov = band_covariance(cube)                        # (n_bands, n_bands)
+
+# PCA
+eigenvalues, eigenvectors = np.linalg.eigh(cov)
+explained = eigenvalues / eigenvalues.sum()
+print(f"PC1 explains {explained[-1]:.1%} of variance")
+
+# Mahalanobis anomaly detection
+prec  = np.linalg.inv(cov)
+flat  = cube.reshape(cube.shape[0], -1)            # (n_bands, pixels)
+mu    = flat.mean(axis=1, keepdims=True)
+delta = flat - mu
+d2    = np.einsum("ij,jk,ki->i", delta.T, prec, delta.T.T)
+anomaly_map = np.sqrt(d2).reshape(cube.shape[1:])  # (rows, cols)
+```
+
+See [COVARIANCE.md](docs/COVARIANCE.md) for full API reference and examples.
+
 ### Spectral indices
 
 ```python
@@ -519,7 +562,10 @@ sentinel_processor/
 ├── analysis/
 │   ├── __init__.py
 │   ├── _sentinel_stats_bridge.py
-│   └── fortran/sentinel_stats.f90
+│   ├── _band_covariance_bridge.py
+│   └── fortran/
+│       ├── sentinel_stats.f90
+│       └── band_covariance.f90
 ├── filters/
 │   ├── __init__.py
 │   ├── _filters_bridge.py
@@ -559,6 +605,7 @@ sentinel_processor/
 tests/
 ├── conftest.py
 ├── test_analysis.py
+├── test_band_covariance.py
 ├── test_validation.py
 ├── test_indices.py
 ├── test_filters.py
@@ -570,6 +617,7 @@ tests/
 
 docs/
 ├── ANALYSIS.md
+├── COVARIANCE.md
 ├── DOWNLOADER.md
 ├── FILTERS.md
 ├── INDICES.md

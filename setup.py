@@ -17,6 +17,7 @@ _TARGETS = [
     ("sentinel_processor/processing/fortran",   "timeseries_mod.f90","libsentinel_timeseries"),
     ("sentinel_processor/filters/fortran",      "filters.f90",       "libsentinel_filters"),
     ("sentinel_processor/analysis/fortran",     "sentinel_stats.f90","libsentinel_stats"),
+    ("sentinel_processor/analysis/fortran",     "band_covariance.f90","libband_covariance"),
     ("sentinel_processor/texture/fortran",      "texture_mod.f90",   "libsentinel_texture"),
 ]
 
@@ -63,7 +64,8 @@ def _copy_runtime_dlls(dest: Path) -> None:
             if src.exists():
                 dst = dest / dll
                 if not dst.exists():
-                    shutil.copy2(str(src), str(dst))
+                    import shutil as _sh
+                    _sh.copy2(str(src), str(dst))
                 break
 
 
