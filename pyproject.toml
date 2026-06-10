@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentinel-processor"
-version = "0.1.1"
-description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, and Plotly visualisation"
+version = "0.1.2"
+description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, temporal statistics, and Plotly visualisation"
 readme = "README.md"
 license = {file = "LICENSE.md"}
 requires-python = ">=3.10"
 
-keywords = ["sentinel-2", "remote-sensing", "satellite", "stac", "rasterio", "plotly"]
+keywords = ["sentinel-2", "remote-sensing", "satellite", "stac", "rasterio", "plotly", "time-series", "phenology"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -70,6 +70,13 @@ sentinel_processor = [
     "processing/fortran/libsentinel_timeseries*.dll",
     "filters/fortran/*.so",
     "filters/fortran/*.dll",
+    # Analysis module
+    "analysis/fortran/*.f90",
+    "analysis/fortran/*.so",
+    "analysis/fortran/*.dll",
+    "analysis/fortran/libgfortran*.dll",
+    "analysis/fortran/libgcc*.dll",
+    "analysis/fortran/libwinpthread*.dll",
     # MSYS2 runtime DLLs bundled on Windows
     "validation/fortran/libgfortran*.dll",
     "validation/fortran/libgcc*.dll",
