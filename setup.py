@@ -17,6 +17,7 @@ _TARGETS = [
     ("sentinel_processor/processing/fortran",   "timeseries_mod.f90","libsentinel_timeseries"),
     ("sentinel_processor/filters/fortran",      "filters.f90",       "libsentinel_filters"),
     ("sentinel_processor/analysis/fortran",     "sentinel_stats.f90","libsentinel_stats"),
+    ("sentinel_processor/texture/fortran",      "texture_mod.f90",   "libsentinel_texture"),
 ]
 
 _RUNTIME_DLLS = [

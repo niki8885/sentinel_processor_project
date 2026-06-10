@@ -77,9 +77,9 @@ jobs:
 
           CIBW_TEST_COMMAND_LINUX: >-
             bash -c "pip install --only-binary :all: rasterio pyproj rioxarray &&
-            python -c \"import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; from sentinel_processor.analysis._sentinel_stats_bridge import NODATA; print(sorted(list_indices())); print(sorted(list_filters())); print('ALL OK')\""
+            python -c \"import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; from sentinel_processor.analysis._sentinel_stats_bridge import NODATA; from sentinel_processor.texture import compute_glcm; print(sorted(list_indices())); print(sorted(list_filters())); print('ALL OK')\""
           CIBW_TEST_COMMAND: >-
-            python -c "import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; from sentinel_processor.analysis._sentinel_stats_bridge import NODATA; print('Indices:', sorted(list_indices())); print('Filters:', sorted(list_filters())); print('Analysis NODATA:', NODATA); print('ALL OK')"
+            python -c "import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; from sentinel_processor.analysis._sentinel_stats_bridge import NODATA; from sentinel_processor.texture import compute_glcm; print('Indices:', sorted(list_indices())); print('Filters:', sorted(list_filters())); print('Analysis NODATA:', NODATA); print('ALL OK')"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4

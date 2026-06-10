@@ -22,6 +22,7 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 | **Pansharpening** | Gram-Schmidt, IHS, Wavelet — inject PAN detail into MS bands (Fortran) |
 | **Time series** | Quality-filtered temporal stack builder with cloud/snow filtering, alignment, and save (Fortran validation + raster ops) |
 | **Gap filling** | Fill cloud-masked holes in time stacks: linear, Savitzky-Golay, PCHIP, Holt ETS, Gaussian (Fortran) |
+| **Texture** | GLCM texture features per pixel: energy, contrast, homogeneity — window, distance, and angle-configurable (Fortran) |
 | **Analysis** | 14 per-pixel temporal statistics: coverage, gap stats, quantiles, IQR outlier mask, rolling mean/std/slope, z-score anomaly, Mann-Kendall trend test, Theil-Sen robust slope, BFAST structural break, OLS regression with R², phenology (SOS/EOS/peak), Pearson correlation (Fortran) |
 | **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, grid, SCL mask |
 
@@ -78,6 +79,10 @@ gfortran -O2 -shared -fPIC \
 gfortran -O2 -shared -fPIC \
   -o sentinel_processor/analysis/fortran/libsentinel_stats.so \
   sentinel_processor/analysis/fortran/sentinel_stats.f90
+
+gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/texture/fortran/libsentinel_texture.so \
+  sentinel_processor/texture/fortran/texture_mod.f90
 ```
 
 **Windows** (MSYS2 UCRT64 — do **not** use `-static-libgfortran` on GCC 16+)
@@ -90,12 +95,13 @@ gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_proces
 gfortran -O2 -shared -o sentinel_processor\processing\fortran\libsentinel_timeseries.dll sentinel_processor\processing\fortran\timeseries_mod.f90
 gfortran -O2 -shared -o sentinel_processor\filters\fortran\libsentinel_filters.dll sentinel_processor\filters\fortran\filters.f90
 gfortran -O2 -shared -o sentinel_processor\analysis\fortran\libsentinel_stats.dll sentinel_processor\analysis\fortran\sentinel_stats.f90
+gfortran -O2 -shared -o sentinel_processor\texture\fortran\libsentinel_texture.dll sentinel_processor\texture\fortran\texture_mod.f90
 ```
 
 After compiling on Windows, copy the MSYS2 runtime DLLs next to each `.dll`:
 
 ```bat
-for %d in (validation indices processing filters analysis) do (
+for %d in (validation indices processing filters analysis texture) do (
   copy C:\msys64\ucrt64\bin\libgfortran-5.dll    sentinel_processor\%d\fortran\
   copy C:\msys64\ucrt64\bin\libgcc_s_seh-1.dll   sentinel_processor\%d\fortran\
   copy C:\msys64\ucrt64\bin\libwinpthread-1.dll   sentinel_processor\%d\fortran\
@@ -203,6 +209,7 @@ plot_grid([
 | `sentinel_processor.processing` | Pansharpening + raster ops (Fortran) | [PANSHARPENING.md](docs/PANSHARPENING.md) · [RASTER_OPS.md](docs/RASTER_OPS.md) |
 | `sentinel_processor.input.timeseries` | Quality-filtered temporal stack builder | [TIMESERIES.md](docs/TIMESERIES.md) |
 | `sentinel_processor.processing._timeseries_bridge` | Gap filling for time stacks (Fortran) | [TIMESERIES.md](docs/TIMESERIES.md#gap-filling) |
+| `sentinel_processor.texture` | GLCM texture features: energy, contrast, homogeneity (Fortran) | [TEXTURE.md](docs/TEXTURE.md) |
 | `sentinel_processor.analysis` | 14 per-pixel temporal statistics: trend, anomaly, phenology, regression (Fortran) | [ANALYSIS.md](docs/ANALYSIS.md) |
 | `sentinel_processor.visualisation` | Interactive Plotly figures | [VISUALISATION.md](docs/VISUALISATION.md) |
 
@@ -527,6 +534,11 @@ sentinel_processor/
 │   ├── __init__.py
 │   ├── downloader.py
 │   └── timeseries.py
+├── texture/
+│   ├── __init__.py
+│   ├── texture.py
+│   ├── _texture_bridge.py
+│   └── fortran/texture_mod.f90
 ├── processing/
 │   ├── __init__.py
 │   ├── _fortran_bridge.py
@@ -551,6 +563,7 @@ tests/
 ├── test_indices.py
 ├── test_filters.py
 ├── test_processing.py
+├── test_texture.py
 ├── test_timeseries.py
 ├── test_timeseries_bridge.py
 └── test_visualisation.py
@@ -558,12 +571,13 @@ tests/
 docs/
 ├── ANALYSIS.md
 ├── DOWNLOADER.md
-├── VALIDATION.md
-├── INDICES.md
 ├── FILTERS.md
+├── INDICES.md
 ├── PANSHARPENING.md
 ├── RASTER_OPS.md
+├── TEXTURE.md
 ├── TIMESERIES.md
+├── VALIDATION.md
 └── VISUALISATION.md
 ```
 
