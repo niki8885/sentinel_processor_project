@@ -1,5 +1,4 @@
 import os
-import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -10,15 +9,16 @@ from setuptools.command.build_ext import build_ext
 ROOT = Path(__file__).parent
 
 _TARGETS = [
-    ("sentinel_processor/validation/fortran",  "validation.f90",    "libsentinel_validation"),
-    ("sentinel_processor/indices/fortran",      "indices_mod.f90",   "libsentinel_indices"),
-    ("sentinel_processor/processing/fortran",   "raster_ops.f90",    "libsentinel_raster_ops"),
-    ("sentinel_processor/processing/fortran",   "pansharpening.f90", "libsentinel_processing"),
-    ("sentinel_processor/processing/fortran",   "timeseries_mod.f90","libsentinel_timeseries"),
-    ("sentinel_processor/filters/fortran",      "filters.f90",       "libsentinel_filters"),
-    ("sentinel_processor/analysis/fortran",     "sentinel_stats.f90","libsentinel_stats"),
-    ("sentinel_processor/analysis/fortran",     "band_covariance.f90","libband_covariance"),
-    ("sentinel_processor/texture/fortran",      "texture_mod.f90",   "libsentinel_texture"),
+    ("sentinel_processor/validation/fortran", "validation.f90", "libsentinel_validation"),
+    ("sentinel_processor/indices/fortran", "indices_mod.f90", "libsentinel_indices"),
+    ("sentinel_processor/processing/fortran", "raster_ops.f90", "libsentinel_raster_ops"),
+    ("sentinel_processor/processing/fortran", "pansharpening.f90", "libsentinel_processing"),
+    ("sentinel_processor/processing/fortran", "timeseries_mod.f90", "libsentinel_timeseries"),
+    ("sentinel_processor/filters/fortran", "filters.f90", "libsentinel_filters"),
+    ("sentinel_processor/analysis/fortran", "sentinel_stats.f90", "libsentinel_stats"),
+    ("sentinel_processor/analysis/fortran", "band_covariance.f90", "libband_covariance"),
+    ("sentinel_processor/texture/fortran", "texture_mod.f90", "libsentinel_texture"),
+    ("sentinel_processor/wavelet/fortran", "wavelet_mod.f90", "libsentinel_wavelet"),
 ]
 
 _RUNTIME_DLLS = [
@@ -41,7 +41,7 @@ def _find_gfortran() -> str | None:
         try:
             r = subprocess.run(
                 [name, "--version"],
-                capture_output=True, text=True
+                capture_output=True, text=True,
             )
             if r.returncode == 0:
                 return name
@@ -64,8 +64,7 @@ def _copy_runtime_dlls(dest: Path) -> None:
             if src.exists():
                 dst = dest / dll
                 if not dst.exists():
-                    import shutil as _sh
-                    _sh.copy2(str(src), str(dst))
+                    shutil.copy2(str(src), str(dst))
                 break
 
 
@@ -79,13 +78,12 @@ def _compile_fortran(root: Path) -> None:
         )
         return
 
-    is_win  = sys.platform == "win32"
-    is_mac  = sys.platform == "darwin"
-    ext     = ".dll" if is_win else ".so"
-    flags   = ["-O2", "-shared"] + ([] if is_win else ["-fPIC"])
+    is_win = sys.platform == "win32"
+    is_mac = sys.platform == "darwin"
+    ext = ".dll" if is_win else ".so"
+    flags = ["-O2", "-shared"] + ([] if is_win else ["-fPIC"])
 
     if is_mac:
-        # Pass ARCHFLAGS so cross-compilation (arm64/x86_64) works
         for token in os.environ.get("ARCHFLAGS", "").split():
             if token.startswith("-arch"):
                 flags.append(token)
@@ -115,8 +113,8 @@ class FortranBuildExt(build_ext):
 
         import shutil
         build_lib = Path(self.build_lib)
-        is_win    = sys.platform == "win32"
-        lib_ext   = ".dll" if is_win else ".so"
+        is_win = sys.platform == "win32"
+        lib_ext = ".dll" if is_win else ".so"
 
         for subdir, _src, lib_stem in _TARGETS:
             src_lib = ROOT / subdir / f"{lib_stem}{lib_ext}"
@@ -135,7 +133,6 @@ class FortranBuildExt(build_ext):
         ext_path.parent.mkdir(parents=True, exist_ok=True)
 
         if sys.platform == "darwin":
-            # Compile a minimal real dylib so delocate --require-archs passes
             import tempfile
             c_src = """
 #include <Python.h>
@@ -163,6 +160,7 @@ PyMODINIT_FUNC PyInit__sentinel_fortran(void) { return NULL; }
                 b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8 +
                 b"\x03\x00" + b"\x3e\x00" + b"\x01\x00\x00\x00" + b"\x00" * 24
             )
+
 
 _dummy_ext = Extension(
     name="sentinel_processor._sentinel_fortran",
