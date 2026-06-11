@@ -2,7 +2,7 @@ name: Build wheels
 
 on:
   push:
-    tags: ["v*.*.*"]
+    tags: [ "v*.*.*" ]
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
 
     steps:
       - uses: actions/checkout@v4
@@ -22,17 +22,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      # ── macOS: gfortran via Homebrew + create /usr/local/bin/gfortran symlink
+      # ── macOS: gfortran via Homebrew ──────────────────────────────────────
       - name: Install gfortran (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install gcc
-          # Find the versioned gfortran binary Homebrew installs
           GF=$(ls /usr/local/bin/gfortran-* /opt/homebrew/bin/gfortran-* 2>/dev/null | sort -V | tail -1)
           echo "Found gfortran: $GF"
-          # Create symlink so setup.py can find plain 'gfortran'
           sudo ln -sf "$GF" /usr/local/bin/gfortran 2>/dev/null || ln -sf "$GF" /usr/local/bin/gfortran || true
-          # Also set env var for setup.py _find_gfortran()
           echo "GFORTRAN_PATH=$GF" >> $GITHUB_ENV
           $GF --version
 
@@ -57,14 +54,11 @@ jobs:
         uses: pypa/cibuildwheel@v2.19.2
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
-          CIBW_SKIP:  "*-win32 *-manylinux_i686 *-musllinux*"
+          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux*"
           CIBW_BUILD_VERBOSITY: "1"
 
-          # Linux: install gfortran once per container (before_all)
           CIBW_BEFORE_ALL_LINUX: yum install -y gcc-gfortran || true
 
-          # Test: install runtime deps so imports work
-          # Pre-install geo deps as binary wheels before the test venv is created
           CIBW_BEFORE_TEST: >-
             pip install --only-binary :all: numpy rasterio rioxarray pyproj xarray plotly pystac-client || true
           CIBW_TEST_REQUIRES: "numpy rasterio rioxarray xarray plotly pystac-client"
@@ -72,14 +66,36 @@ jobs:
             PIP_ONLY_BINARY="rasterio:pyproj:numpy:shapely:GDAL"
           CIBW_ENVIRONMENT_WINDOWS: >-
             PIP_ONLY_BINARY="rasterio:pyproj:numpy:shapely:GDAL"
-          # macOS: skip --require-archs check since our stub is minimal
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: "delocate-wheel -w {dest_dir} -v {wheel}"
 
           CIBW_TEST_COMMAND_LINUX: >-
             bash -c "pip install --only-binary :all: rasterio pyproj rioxarray &&
-            python -c \"import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; from sentinel_processor.analysis._sentinel_stats_bridge import NODATA; from sentinel_processor.analysis._band_covariance_bridge import band_covariance; from sentinel_processor.texture import compute_glcm; print(sorted(list_indices())); print(sorted(list_filters())); print('ALL OK')\""
+            python -c \"
+            import sentinel_processor
+            from sentinel_processor.indices.compute    import list_indices
+            from sentinel_processor.filters.compute    import list_filters
+            from sentinel_processor.analysis._sentinel_stats_bridge   import NODATA
+            from sentinel_processor.analysis._band_covariance_bridge  import band_covariance
+            from sentinel_processor.texture             import compute_glcm
+            from sentinel_processor.wavelet._wavelet_bridge import dwt2d, idwt2d, bayes_denoise
+            print(sorted(list_indices()))
+            print(sorted(list_filters()))
+            print('ALL OK')
+            \""
           CIBW_TEST_COMMAND: >-
-            python -c "import sentinel_processor; from sentinel_processor.indices.compute import list_indices; from sentinel_processor.filters.compute import list_filters; from sentinel_processor.analysis._sentinel_stats_bridge import NODATA; from sentinel_processor.analysis._band_covariance_bridge import band_covariance; from sentinel_processor.texture import compute_glcm; print('Indices:', sorted(list_indices())); print('Filters:', sorted(list_filters())); print('Analysis NODATA:', NODATA); print('ALL OK')"
+            python -c "
+            import sentinel_processor
+            from sentinel_processor.indices.compute    import list_indices
+            from sentinel_processor.filters.compute    import list_filters
+            from sentinel_processor.analysis._sentinel_stats_bridge   import NODATA
+            from sentinel_processor.analysis._band_covariance_bridge  import band_covariance
+            from sentinel_processor.texture             import compute_glcm
+            from sentinel_processor.wavelet._wavelet_bridge import dwt2d, idwt2d, bayes_denoise
+            print('Indices:', sorted(list_indices()))
+            print('Filters:', sorted(list_filters()))
+            print('Analysis NODATA:', NODATA)
+            print('ALL OK')
+            "
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -106,7 +122,7 @@ jobs:
   # ── Twine check ───────────────────────────────────────────────────────────
   check:
     name: twine check
-    needs: [build_wheels, build_sdist]
+    needs: [ build_wheels, build_sdist ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
