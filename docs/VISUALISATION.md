@@ -14,7 +14,13 @@ pip install sentinel-processor
 ## Import
 
 ```python
-from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask
+from sentinel_processor.visualisation.plot import (
+    plot_band,
+    plot_rgb,
+    plot_grid,
+    plot_mask,
+    plot_timeseries,
+)
 ```
 
 ## Module layout
@@ -32,6 +38,8 @@ All functions return a `plotly.graph_objects.Figure`.
 Pass `save_html="path/to/file.html"` to write a self-contained interactive HTML file.
 Call `.show()` to open in the browser, or use `.to_html()` / `.write_image()` for further export.
 
+---
+
 ## API reference
 
 ### plot_band
@@ -43,7 +51,7 @@ def plot_band(
     colorscale: str = "Viridis",
     title: str | None = None,
     save_html: str | Path | None = None,
-) -> go.Figure:
+) -> go.Figure
 ```
 
 Visualise a single band or index as an interactive heatmap.
@@ -56,6 +64,8 @@ Visualise a single band or index as an interactive heatmap.
 | `title` | `str \| None` | auto | Figure title |
 | `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
 
+---
+
 ### plot_rgb
 
 ```python
@@ -66,12 +76,10 @@ def plot_rgb(
     blue_band: str | int | None = None,
     title: str | None = None,
     save_html: str | Path | None = None,
-) -> go.Figure:
+) -> go.Figure
 ```
 
-RGB preview with automatic percentile stretch (2–98%).
-
-Two modes — determined by whether band arguments are passed:
+RGB preview with automatic percentile stretch (2–98 %).
 
 **Mode A — visual file** (pre-made 3-band overview from the downloader):
 Pass only `source`. Bands are taken in order: index 0 = R, 1 = G, 2 = B.
@@ -88,6 +96,8 @@ Pass `source` + explicit band names. Supports true colour and any false-colour c
 | `title` | `str \| None` | auto | Figure title |
 | `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
 
+---
+
 ### plot_grid
 
 ```python
@@ -97,12 +107,12 @@ def plot_grid(
     colorscale: str = "Viridis",
     title: str | None = None,
     save_html: str | Path | None = None,
-) -> go.Figure:
+) -> go.Figure
 ```
 
-Grid of heatmaps from any mix of files and bands — spectral, indices, visual, technical.
+Grid of heatmaps from any mix of files and bands.
 
-Each panel is a `dict` with these keys:
+Each panel is a `dict`:
 
 | Key | Type | Required | Description |
 |---|---|---|---|
@@ -111,15 +121,9 @@ Each panel is a `dict` with these keys:
 | `"label"` | `str` | — | Subplot title; auto-generated if omitted |
 | `"colorscale"` | `str` | — | Per-panel colorscale override |
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `panels` | `list[dict]` | — | Panel definitions (see above) |
-| `ncols` | `int` | `3` | Number of columns in the grid |
-| `colorscale` | `str` | `"Viridis"` | Default colorscale for all panels |
-| `title` | `str \| None` | auto | Figure title |
-| `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
-
 Files are cached in memory — referencing the same file multiple times with different bands does not re-open it.
+
+---
 
 ### plot_mask
 
@@ -130,14 +134,14 @@ def plot_mask(
     title: str | None = None,
     save_html: str | Path | None = None,
     return_mask: bool = False,
-) -> go.Figure | tuple[go.Figure, np.ndarray]:
+) -> go.Figure | tuple[go.Figure, np.ndarray]
 ```
 
 Binary cloud / artefact mask from an SCL layer. Produces three panels:
 
 - **Binary heatmap** — green = clear, red = bad
 - **Pie chart** — clear % vs bad %
-- **SCL class breakdown** — horizontal bar chart for classes present in the file; bad classes highlighted in red
+- **SCL class breakdown** — horizontal bar chart; bad classes highlighted in red
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -146,6 +150,59 @@ Binary cloud / artefact mask from an SCL layer. Produces three panels:
 | `title` | `str \| None` | auto | Figure title |
 | `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
 | `return_mask` | `bool` | `False` | If `True`, also returns `np.ndarray` (1 = bad, 0 = clear) |
+
+---
+
+### plot_timeseries
+
+```python
+def plot_timeseries(
+    stack: xr.DataArray | str | Path,
+    lon: float,
+    lat: float,
+    bands: list[str] | None = None,
+    scl_path: str | Path | None = None,
+    agg_bbox: float | None = None,
+    save_html: str | Path | None = None,
+) -> go.Figure
+```
+
+Interactive time-series chart for a specific pixel or small region.
+The primary visual debugging tool for all time-series workflows.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `stack` | `xr.DataArray \| str \| Path` | — | `(time, band, y, x)` DataArray **or** path to `.nc` / `.tif` stack |
+| `lon` | `float` | — | WGS-84 longitude of the query point |
+| `lat` | `float` | — | WGS-84 latitude of the query point |
+| `bands` | `list[str] \| None` | `None` | Band names to plot. `None` → all bands in the stack |
+| `scl_path` | `str \| Path \| None` | `None` | SCL file **or** directory of per-scene SCL files; enables cloud / shadow markers |
+| `agg_bbox` | `float \| None` | `None` | Half-width in degrees of a spatial averaging box. `None` = nearest pixel |
+| `save_html` | `str \| Path \| None` | `None` | Save path for HTML output |
+
+**Extraction modes**
+
+- **Single-pixel** (`agg_bbox=None`): nearest-pixel selection.
+  Projected CRS (e.g. UTM) is handled — the query point is reprojected automatically.
+- **Region** (`agg_bbox=<float>`): clips a `±agg_bbox`° bbox and returns the spatial
+  mean of all finite, non-nodata pixels. Useful for field-scale averages.
+
+**Cloud / shadow overlay** (requires `scl_path`)
+
+SCL classes `{0, 1, 3, 8, 9, 10}` are treated as contaminated:
+
+- Contaminated observations → **red ✕ markers**
+- Clear observations → **filled circles** in the band colour
+
+`scl_path` can be:
+- A **single SCL file** — applied to every time step
+- A **directory** — matched per time step using `scl_<timestamp>*.tif` naming
+  (the layout produced by `download_sentinel2`)
+
+**Multiple bands** are plotted on the same figure with separate coloured traces
+(sky-blue → green → amber → pink → lavender → teal → yellow, cycling).
+
+---
 
 ## SCL class reference
 
@@ -164,6 +221,8 @@ Binary cloud / artefact mask from an SCL layer. Produces three panels:
 | 10 | Thin Cirrus | ✓ |
 | 11 | Snow / Ice | — |
 
+---
+
 ## Examples
 
 ### Single band or index
@@ -174,15 +233,12 @@ from sentinel_processor.visualisation.plot import plot_band
 # NIR band from raw spectral file
 plot_band("data/spectral/budapest_20260526T095725.nc", band="nir").show()
 
-# NDVI index (single-band .tif — no band arg needed)
+# NDVI index (single-band .tif)
 plot_band(
     "data/indices/indices_budapest_20260526T095725_ndvi.tif",
     colorscale="RdYlGn",
     save_html="data/vis/ndvi.html",
 ).show()
-
-# SWIR1 with custom colorscale
-plot_band("data/spectral/budapest_20260526T095725.nc", band="swir16", colorscale="Inferno").show()
 ```
 
 ### RGB preview
@@ -215,30 +271,11 @@ from sentinel_processor.visualisation.plot import plot_grid
 
 scene = "data/spectral/budapest_20260526T095725.nc"
 
-# all 10 spectral bands
 plot_grid(
-    [
-        {"file": scene, "band": b, "label": b}
-        for b in ["blue", "green", "red", "nir",
-                  "rededge1", "rededge2", "rededge3",
-                  "nir08", "swir16", "swir22"]
-    ],
-    ncols=5,
-    save_html="data/vis/all_bands.html",
-).show()
-
-# visual channels + indices
-plot_grid(
-    [
-        {"file": "data/visual/vis_budapest_20260526T095725.nc", "band": 0, "label": "Red"},
-        {"file": "data/visual/vis_budapest_20260526T095725.nc", "band": 1, "label": "Green"},
-        {"file": "data/visual/vis_budapest_20260526T095725.nc", "band": 2, "label": "Blue"},
-        {"file": "data/indices/indices_budapest_20260526T095725_ndvi.tif", "label": "NDVI", "colorscale": "RdYlGn"},
-        {"file": "data/indices/indices_budapest_20260526T095725_ndwi.tif", "label": "NDWI", "colorscale": "Blues"},
-        {"file": "data/indices/indices_budapest_20260526T095725_ndbi.tif", "label": "NDBI", "colorscale": "Reds"},
-    ],
+    [{"file": scene, "band": b, "label": b}
+     for b in ["blue", "green", "red", "nir", "swir16", "swir22"]],
     ncols=3,
-    save_html="data/vis/grid.html",
+    save_html="data/vis/bands.html",
 ).show()
 ```
 
@@ -247,17 +284,8 @@ plot_grid(
 ```python
 from sentinel_processor.visualisation.plot import plot_mask
 
-# default bad classes (clouds, shadows, no-data)
 plot_mask("data/technical/scl_budapest_20260526T095725.nc").show()
 
-# only flag cloud and cirrus
-plot_mask(
-    "data/technical/scl_budapest_20260526T095725.nc",
-    bad_classes=[8, 9, 10],
-    save_html="data/vis/cloud_mask.html",
-).show()
-
-# also get the numpy mask array
 fig, mask_arr = plot_mask(
     "data/technical/scl_budapest_20260526T095725.nc",
     return_mask=True,
@@ -265,39 +293,147 @@ fig, mask_arr = plot_mask(
 print(mask_arr.shape, mask_arr.sum(), "bad pixels")
 ```
 
+### NDVI + EVI time series for a crop field with cloud markers
+
+```python
+from pathlib import Path
+from sentinel_processor.visualisation.plot import plot_timeseries
+
+# Maize field near Kecskemét, Hungary
+LON, LAT = 19.688, 46.901
+
+fig = plot_timeseries(
+    stack="output/kecskémet_stack.nc",   # (time, band, y, x) NetCDF
+    lon=LON,
+    lat=LAT,
+    bands=["ndvi", "evi"],               # both indices on one chart
+    scl_path="output/technical/",        # per-scene SCL directory → cloud markers
+    agg_bbox=0.001,                      # ~100 m spatial average for field scale
+    save_html="output/crop_ts.html",
+)
+fig.show()
+```
+
+The chart renders two coloured lines (NDVI in sky-blue, EVI in green).
+Cloud-contaminated acquisitions appear as **red ✕** marks; clear observations
+get **filled circle** markers. Hover over any point for the exact date and value.
+
+### Single-pixel inspection from an in-memory DataArray
+
+```python
+from sentinel_processor.visualisation.plot import plot_timeseries
+
+# stack_result is a StackResult from stack_timeseries()
+fig = plot_timeseries(
+    stack=stack_result.stack,
+    lon=19.05,
+    lat=47.49,
+    bands=["ndvi"],
+)
+fig.show()
+```
+
+### Region mean, no cloud overlay
+
+```python
+fig = plot_timeseries(
+    stack="output/budapest_stack.nc",
+    lon=19.040,
+    lat=47.498,
+    bands=["ndvi", "swir16"],
+    agg_bbox=0.005,   # ~500 m spatial average
+)
+fig.show()
+```
+
+---
+
 ### Full pipeline
 
 ```python
 import sentinel_processor as sp
 from sentinel_processor.indices.compute import compute_indices
-from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask
+from sentinel_processor.visualisation.plot import (
+    plot_band, plot_rgb, plot_grid, plot_mask, plot_timeseries,
+)
 
 # 1. download
 results = sp.download_sentinel2(
     [sp.LocationSpec(lat=47.56, lon=19.17, name="budapest")],
-    cfg=sp.DownloadConfig(bands=sp.SpectralBands.ALL, keep_items=1),
+    cfg=sp.DownloadConfig(bands=sp.SpectralBands.ALL, keep_items=6),
 )
 
 scene = "data/spectral/budapest_20260526T095725.nc"
-vis   = "data/visual/vis_budapest_20260526T095725.nc"
 scl   = "data/technical/scl_budapest_20260526T095725.nc"
 
 # 2. compute indices
-idx_paths = compute_indices(scene, ["ndvi", "ndwi", "ndbi"])
+idx_paths = compute_indices(scene, ["ndvi", "evi", "ndwi"])
 
-# 3. visualise
-plot_rgb(vis, save_html="data/vis/rgb.html").show()
+# 3. single-scene views
+plot_rgb(scene, red_band="red", green_band="green", blue_band="blue",
+         save_html="data/vis/rgb.html").show()
 plot_band(scene, band="nir", save_html="data/vis/nir.html").show()
-plot_band(idx_paths["ndvi"], colorscale="RdYlGn", save_html="data/vis/ndvi.html").show()
 plot_mask(scl, save_html="data/vis/mask.html").show()
-plot_grid(
-    [
-        {"file": scene,               "band": "red", "label": "Red"},
-        {"file": scene,               "band": "nir", "label": "NIR"},
-        {"file": idx_paths["ndvi"],                  "label": "NDVI", "colorscale": "RdYlGn"},
-        {"file": idx_paths["ndwi"],                  "label": "NDWI", "colorscale": "Blues"},
-    ],
-    ncols=4,
-    save_html="data/vis/summary.html",
+
+# 4. time series from a stack built by stack_timeseries()
+from sentinel_processor.timeseries import stack_timeseries, TimeSeriesConfig
+from pathlib import Path
+
+spectral_files = sorted(Path("data/spectral").glob("budapest_*.nc"))
+result = stack_timeseries(spectral_files, scl_dir="data/technical/")
+
+plot_timeseries(
+    stack=result.stack,
+    lon=19.17, lat=47.56,
+    bands=["ndvi", "evi"],
+    scl_path="data/technical/",
+    agg_bbox=0.002,
+    save_html="data/vis/timeseries.html",
 ).show()
+```
+
+---
+
+## Dark-theme colour reference
+
+All functions share a consistent dark palette.
+
+| Role | Hex |
+|---|---|
+| Paper / outer background | `#0f1117` |
+| Plot area (time series) | `#1a1d27` |
+| Grid lines | `#2a2d3a` |
+| Cloud / shadow marker | `#e63946` |
+| Clear vegetation mask | `#3cb371` |
+| Bad-pixel mask | `#e63946` |
+
+Band colours cycle through:
+`#4fc3f7` (sky-blue) → `#81c784` (green) → `#ffb74d` (amber) →
+`#f06292` (pink) → `#ce93d8` (lavender) → `#80cbc4` (teal) → `#fff176` (yellow).
+
+---
+
+## Running the tests
+
+```bash
+# from the repo root
+pytest tests/test_visualisation.py -v
+
+# run only the new time-series tests
+pytest tests/test_visualisation.py -v -k "timeseries"
+
+# skip if optional deps are absent (rasterio, plotly)
+pytest tests/test_visualisation.py -v --ignore-glob="*integration*"
+```
+
+Expected output (all deps present):
+
+```
+tests/test_visualisation.py::TestPstretch::test_output_range_0_to_1         PASSED
+tests/test_visualisation.py::TestPstretch::test_dtype_float32                PASSED
+...
+tests/test_visualisation.py::TestPlotTimeseries::test_returns_figure         PASSED
+tests/test_visualisation.py::TestPlotTimeseries::test_line_traces_equal_band_count PASSED
+tests/test_visualisation.py::TestPlotTimeseries::test_cloud_marker_count_matches_cloudy_steps PASSED
+...
 ```
