@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sentinel-processor"
 version = "0.2.0"
-description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, temporal statistics, band covariance, wavelet denoising, and Plotly visualisation"
+description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, temporal statistics, band covariance, wavelet denoising, DL normalisation / tiling, and Plotly visualisation"
 readme = "README.md"
 license = {file = "LICENSE.md"}
 requires-python = ">=3.10"
@@ -14,6 +14,7 @@ keywords = [
     "sentinel-2", "remote-sensing", "satellite", "stac",
     "rasterio", "plotly", "time-series", "phenology",
     "pca", "covariance", "wavelet", "denoising",
+    "deep-learning", "normalisation", "tiling",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -65,8 +66,8 @@ sentinel_processor = [
     "filters/fortran/*.f90",
     "analysis/fortran/*.f90",
     "texture/fortran/*.f90",
-    # NEW: wavelet module
     "wavelet/fortran/*.f90",
+    "dl/fortran/*.f90",
 
     # Compiled libraries — included when present (built in setup.py)
     "validation/fortran/*.so",
@@ -83,9 +84,10 @@ sentinel_processor = [
     "analysis/fortran/*.dll",
     "texture/fortran/*.so",
     "texture/fortran/*.dll",
-    # NEW: wavelet shared libraries
     "wavelet/fortran/*.so",
     "wavelet/fortran/*.dll",
+    "dl/fortran/*.so",
+    "dl/fortran/*.dll",
 
     # MSYS2 runtime DLLs bundled on Windows
     "validation/fortran/libgfortran*.dll",
@@ -106,10 +108,12 @@ sentinel_processor = [
     "texture/fortran/libgfortran*.dll",
     "texture/fortran/libgcc*.dll",
     "texture/fortran/libwinpthread*.dll",
-    # NEW: wavelet runtime DLLs
     "wavelet/fortran/libgfortran*.dll",
     "wavelet/fortran/libgcc*.dll",
     "wavelet/fortran/libwinpthread*.dll",
+    "dl/fortran/libgfortran*.dll",
+    "dl/fortran/libgcc*.dll",
+    "dl/fortran/libwinpthread*.dll",
 ]
 
 [tool.pytest.ini_options]

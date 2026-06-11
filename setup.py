@@ -19,6 +19,7 @@ _TARGETS = [
     ("sentinel_processor/analysis/fortran", "band_covariance.f90", "libband_covariance"),
     ("sentinel_processor/texture/fortran", "texture_mod.f90", "libsentinel_texture"),
     ("sentinel_processor/wavelet/fortran", "wavelet_mod.f90", "libsentinel_wavelet"),
+    ("sentinel_processor/dl/fortran",     "normalize_mod.f90", "libsentinel_normalize"),
 ]
 
 _RUNTIME_DLLS = [
