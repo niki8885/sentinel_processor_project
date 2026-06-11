@@ -26,7 +26,7 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 | **Texture** | GLCM texture features per pixel: energy, contrast, homogeneity — window, distance, and angle-configurable (Fortran) |
 | **Analysis** | 14 per-pixel temporal statistics: coverage, gap stats, quantiles, IQR outlier mask, rolling mean/std/slope, z-score anomaly, Mann-Kendall trend test, Theil-Sen robust slope, BFAST structural break, OLS regression with R², phenology (SOS/EOS/peak), Pearson correlation (Fortran) |
 | **Covariance** | Per-band covariance matrix — single-pass Kahan-compensated algorithm for PCA, feature reduction, and Mahalanobis anomaly detection (Fortran) |
-| **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, grid, SCL mask |
+| **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, multi-panel grid, SCL mask, pixel/region time series with cloud markers |
 
 ---
 
@@ -129,7 +129,7 @@ import sentinel_processor as sp
 from sentinel_processor.indices.compute import compute_indices
 from sentinel_processor.filters import apply_filter
 from sentinel_processor.input.timeseries import stack_timeseries, TimeSeriesConfig
-from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask
+from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask, plot_timeseries
 from pathlib import Path
 
 # 1. Download
@@ -244,6 +244,14 @@ plot_grid([
     {"file": idx["ndvi"],                "label": "NDVI", "colorscale": "RdYlGn"},
     {"file": idx["ndwi"],                "label": "NDWI", "colorscale": "Blues"},
 ], ncols=3).show()
+plot_timeseries(
+    stack=result.stack,
+    lon=19.17, lat=47.56,
+    bands=["ndvi", "evi"],
+    scl_path="data/technical/",
+    agg_bbox=0.002,
+    save_html="data/vis/timeseries.html",
+).show()
 ```
 
 ---
@@ -383,7 +391,9 @@ print(report["confidence_score"])  # 1.0
 ### Visualise
 
 ```python
-from sentinel_processor.visualisation.plot import plot_band, plot_rgb, plot_grid, plot_mask
+from sentinel_processor.visualisation.plot import (
+    plot_band, plot_rgb, plot_grid, plot_mask, plot_timeseries,
+)
 
 plot_band("data/spectral/scene.nc",      band="nir",   colorscale="Plasma").show()
 plot_rgb("data/visual/vis_scene.nc").show()
@@ -394,6 +404,16 @@ plot_grid([
     {"file": "data/spectral/scene.nc", "band": "nir",  "label": "NIR"},
     {"file": "data/indices/scene_ndvi.tif",             "label": "NDVI", "colorscale": "RdYlGn"},
 ], ncols=3).show()
+
+# Time series — pixel or region, with optional cloud markers
+plot_timeseries(
+    stack="data/stacks/budapest_stack.nc",
+    lon=19.17, lat=47.56,
+    bands=["ndvi", "evi"],
+    scl_path="data/technical/",   # directory → per-scene cloud markers
+    agg_bbox=0.002,               # ~200 m spatial average
+    save_html="data/vis/timeseries.html",
+).show()
 ```
 
 ---
