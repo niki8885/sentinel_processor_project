@@ -57,26 +57,33 @@ def _get_lib() -> ctypes.CDLL:
     c_int = ctypes.c_int
     c_dbl = ctypes.c_double
 
+    # dwt2d / idwt2d
     for fn in (lib.dwt2d, lib.idwt2d):
         fn.restype = None
         fn.argtypes = [_DBL_P, c_int, c_int, c_int, c_int, _DBL_P]
 
+    # estimate_sigma(coeffs, n, sigma_out)
     lib.estimate_sigma.restype = None
     lib.estimate_sigma.argtypes = [_DBL_P, c_int, _DBL_P]
 
+    # bayes_threshold(coeffs, n, sigma_n, threshold_out)
     lib.bayes_threshold.restype = None
     lib.bayes_threshold.argtypes = [_DBL_P, c_int, c_dbl, _DBL_P]
 
+    # band_energy(coeffs, n, energy_out)
     lib.band_energy.restype = None
     lib.band_energy.argtypes = [_DBL_P, c_int, _DBL_P]
 
+    # band_stats(coeffs, n, mean, var, l1, linf)
     lib.band_stats.restype = None
     lib.band_stats.argtypes = [_DBL_P, c_int, _DBL_P, _DBL_P, _DBL_P, _DBL_P]
 
+    # dwt2d_batch / idwt2d_batch  (add n_bands argument)
     for fn in (lib.dwt2d_batch, lib.idwt2d_batch):
         fn.restype = None
         fn.argtypes = [_DBL_P, c_int, c_int, c_int, c_int, c_int, _DBL_P]
 
+    # dwt3d / idwt3d  (add n_times argument)
     for fn in (lib.dwt3d, lib.idwt3d):
         fn.restype = None
         fn.argtypes = [_DBL_P, c_int, c_int, c_int, c_int, c_int, _DBL_P]
@@ -84,6 +91,8 @@ def _get_lib() -> ctypes.CDLL:
     _lib = lib
     return _lib
 
+
+# Internal helpers
 
 def _to_f64_f(arr: np.ndarray) -> tuple[ctypes.POINTER, np.ndarray]:
     """Return (ctypes pointer, F-contiguous float64 copy)."""
@@ -123,12 +132,23 @@ def _validate_wavelet(wavelet: str) -> int:
     return _WAVELET_MAP[wavelet]
 
 
+# Coefficient <-> flat-array layout conversion
+
 def _flat_to_dict(
         flat: np.ndarray,
         rows: int,
         cols: int,
         levels: int,
 ) -> dict:
+    """
+    Unpack a flat Fortran-order coefficient array into a structured dict.
+
+    Returns
+    -------
+    dict  { level (int, 1=finest) :
+              { 'LL': ndarray,  (only at level == levels)
+                'LH': ndarray, 'HL': ndarray, 'HH': ndarray } }
+    """
     result: dict[int, dict[str, np.ndarray]] = {}
 
     for lv in range(1, levels + 1):
@@ -163,6 +183,7 @@ def _dict_to_flat(
         cols: int,
         levels: int,
 ) -> np.ndarray:
+    """Pack a coefficient dict back into a flat F-order array."""
     flat = np.zeros(rows * cols, dtype=np.float64)
 
     def _put(arr: np.ndarray, r_start: int, c_start: int) -> None:
@@ -183,6 +204,8 @@ def _dict_to_flat(
 
     return flat
 
+
+# Public API — core transform
 
 def dwt2d(
         arr: np.ndarray,
@@ -261,6 +284,8 @@ def idwt2d(
     )
 
 
+# Public API — thresholding
+
 def threshold_coeffs(
         coeffs: dict,
         threshold: float,
@@ -304,6 +329,8 @@ def threshold_coeffs(
                     result[lv][key] = a
     return result
 
+
+# Public API — noise estimation & BayesShrink
 
 def estimate_sigma(band: np.ndarray) -> float:
     """
@@ -394,6 +421,8 @@ def bayes_denoise(
     return idwt2d(result, wavelet=wavelet)
 
 
+# Public API — sub-band statistics
+
 def band_energy(band: np.ndarray) -> float:
     """
     Squared L2 norm (Parseval energy) of a sub-band array.
@@ -447,6 +476,8 @@ def band_stats(band: np.ndarray) -> dict[str, float]:
     }
 
 
+# Public API — batch processing
+
 def dwt2d_batch(
         stack: np.ndarray,
         levels: int = 1,
@@ -478,9 +509,11 @@ def dwt2d_batch(
     wav_flag = _validate_wavelet(wavelet)
     npix = rows * cols
 
-    flat = np.asfortranarray(
-        stack.reshape(n_bands, npix).T.ravel(), dtype=np.float64
-    )
+    flat = np.empty(n_bands * npix, dtype=np.float64)
+    for b in range(n_bands):
+        flat[b * npix: (b + 1) * npix] = (
+            np.asfortranarray(stack[b], dtype=np.float64).ravel(order="F")
+        )
     out = np.empty_like(flat)
     flat_ptr = flat.ctypes.data_as(_DBL_P)
     out_ptr = out.ctypes.data_as(_DBL_P)
@@ -495,8 +528,7 @@ def dwt2d_batch(
 
     result = []
     for b in range(n_bands):
-        band_flat = out[b * npix: (b + 1) * npix]
-        result.append(_flat_to_dict(band_flat, rows, cols, levels))
+        result.append(_flat_to_dict(out[b * npix: (b + 1) * npix], rows, cols, levels))
     return result
 
 
@@ -540,10 +572,14 @@ def idwt2d_batch(
         out_ptr,
     )
 
-    return np.ascontiguousarray(
-        out.reshape(npix, n_bands, order="F").T.reshape(n_bands, rows, cols)
-    )
+    # Each band b occupies out[b*npix:(b+1)*npix] in F column-major order
+    result = np.empty((n_bands, rows, cols), dtype=np.float64)
+    for b in range(n_bands):
+        result[b] = out[b * npix: (b + 1) * npix].reshape((rows, cols), order="F")
+    return np.ascontiguousarray(result)
 
+
+# Public API — 3-D DWT (spatial + temporal)
 
 def dwt3d(
         arr: np.ndarray,
@@ -581,9 +617,14 @@ def dwt3d(
             f"n_times ({n_times}) must be divisible by 2^levels = {factor}"
         )
 
-    flat = np.asfortranarray(
-        arr.reshape(n_times, rows * cols), dtype=np.float64
-    ).T.ravel()
+    # Fortran layout: time slice t (1-based) at flat[(t-1)*npix .. t*npix],
+    # each slice in column-major (F) order.
+    npix = rows * cols
+    flat = np.empty(n_times * npix, dtype=np.float64)
+    for t in range(n_times):
+        flat[t * npix: (t + 1) * npix] = (
+            np.asfortranarray(arr[t], dtype=np.float64).ravel(order="F")
+        )
     out = np.empty_like(flat)
     flat_ptr = flat.ctypes.data_as(_DBL_P)
     out_ptr = out.ctypes.data_as(_DBL_P)
@@ -595,14 +636,17 @@ def dwt3d(
         out_ptr,
     )
 
-    return np.ascontiguousarray(
-        out.reshape(rows * cols, n_times, order="F").T.reshape(n_times, rows, cols)
-    )
+    # Unpack: each time slice at out[t*npix:(t+1)*npix], F column-major
+    result = np.empty((n_times, rows, cols), dtype=np.float64)
+    for t in range(n_times):
+        result[t] = out[t * npix: (t + 1) * npix].reshape((rows, cols), order="F")
+    return np.ascontiguousarray(result)
 
 
 def idwt3d(
         coeffs: np.ndarray,
         wavelet: Wavelet = "haar",
+        levels: int | None = None,
 ) -> np.ndarray:
     """
     Inverse separable 3-D DWT.
@@ -611,6 +655,9 @@ def idwt3d(
     ----------
     coeffs  : (n_times, rows, cols) coefficient array from :func:`dwt3d`.
     wavelet : Must match the forward transform.
+    levels  : Decomposition depth used in the forward :func:`dwt3d` call.
+              Defaults to ``int(log2(n_times))``; pass explicitly when
+              ``dwt3d`` was called with a different value.
 
     Returns
     -------
@@ -623,9 +670,14 @@ def idwt3d(
     n_times, rows, cols = coeffs.shape
     wav_flag = _validate_wavelet(wavelet)
 
-    flat = np.asfortranarray(
-        coeffs.reshape(n_times, rows * cols), dtype=np.float64
-    ).T.ravel()
+    npix = rows * cols
+    if levels is None:
+        levels = int(np.log2(n_times))
+    flat = np.empty(n_times * npix, dtype=np.float64)
+    for t in range(n_times):
+        flat[t * npix: (t + 1) * npix] = (
+            np.asfortranarray(coeffs[t], dtype=np.float64).ravel(order="F")
+        )
     out = np.empty_like(flat)
     flat_ptr = flat.ctypes.data_as(_DBL_P)
     out_ptr = out.ctypes.data_as(_DBL_P)
@@ -633,11 +685,11 @@ def idwt3d(
     _get_lib().idwt3d(
         flat_ptr,
         ctypes.c_int(rows), ctypes.c_int(cols), ctypes.c_int(n_times),
-        ctypes.c_int(levels := int(np.log2(n_times))),
-        ctypes.c_int(wav_flag),
+        ctypes.c_int(levels), ctypes.c_int(wav_flag),
         out_ptr,
     )
 
-    return np.ascontiguousarray(
-        out.reshape(rows * cols, n_times, order="F").T.reshape(n_times, rows, cols)
-    )
+    result = np.empty((n_times, rows, cols), dtype=np.float64)
+    for t in range(n_times):
+        result[t] = out[t * npix: (t + 1) * npix].reshape((rows, cols), order="F")
+    return np.ascontiguousarray(result)
