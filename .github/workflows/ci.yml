@@ -75,6 +75,10 @@ jobs:
           compile sentinel_processor/wavelet/fortran/libsentinel_wavelet.so \
                    sentinel_processor/wavelet/fortran/wavelet_mod.f90
 
+          # NEW: dl normalisation module
+          compile sentinel_processor/dl/fortran/libsentinel_normalize.so \
+                   sentinel_processor/dl/fortran/normalize_mod.f90
+
       - name: Run tests
         run: >-
           pytest tests/ -v --tb=short
@@ -121,3 +125,6 @@ jobs:
           python -c "from sentinel_processor.analysis._band_covariance_bridge import band_covariance"
           python -c "from sentinel_processor.texture             import compute_glcm"
           python -c "from sentinel_processor.wavelet._wavelet_bridge import dwt2d, idwt2d, bayes_denoise"
+          python -c "from sentinel_processor.dl.normalize import normalize_for_dl, compute_dataset_stats"
+          python -c "from sentinel_processor.dl.tiling   import extract_tiles, stitch_tiles"
+          python -c "from sentinel_processor.dl.presets  import get_preset, AVAILABLE_PRESETS"

@@ -26,6 +26,7 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 | **Texture** | GLCM texture features per pixel: energy, contrast, homogeneity — window, distance, and angle-configurable (Fortran) |
 | **Analysis** | 14 per-pixel temporal statistics: coverage, gap stats, quantiles, IQR outlier mask, rolling mean/std/slope, z-score anomaly, Mann-Kendall trend test, Theil-Sen robust slope, BFAST structural break, OLS regression with R², phenology (SOS/EOS/peak), Pearson correlation (Fortran) |
 | **Covariance** | Per-band covariance matrix — single-pass Kahan-compensated algorithm for PCA, feature reduction, and Mahalanobis anomaly detection (Fortran) |
+| **DL preprocessing** | Per-band normalisation (min–max, z-score, SSL4EO-S12 / SeCo presets), dataset statistics with Welford aggregation, overlapping tile extraction and cosine-blended stitching (Fortran + Python) |
 | **Visualisation** | Interactive Plotly figures: band heatmap, RGB composite, multi-panel grid, SCL mask, pixel/region time series with cloud markers |
 
 ---
@@ -93,6 +94,10 @@ gfortran -O2 -shared -fPIC \
 gfortran -O2 -shared -fPIC \
   -o sentinel_processor/wavelet/fortran/libsentinel_wavelet.so \
   sentinel_processor/wavelet/fortran/wavelet_mod.f90
+
+gfortran -O2 -shared -fPIC \
+  -o sentinel_processor/dl/fortran/libsentinel_normalize.so \
+  sentinel_processor/dl/fortran/normalize_mod.f90
 ```
 
 **Windows** (MSYS2 UCRT64 — do **not** use `-static-libgfortran` on GCC 16+)
@@ -108,12 +113,13 @@ gfortran -O2 -shared -o sentinel_processor\analysis\fortran\libsentinel_stats.dl
 gfortran -O2 -shared -o sentinel_processor\analysis\fortran\libband_covariance.dll sentinel_processor\analysis\fortran\band_covariance.f90
 gfortran -O2 -shared -o sentinel_processor\texture\fortran\libsentinel_texture.dll sentinel_processor\texture\fortran\texture_mod.f90
 gfortran -O2 -shared -o sentinel_processor\wavelet\fortran\libsentinel_wavelet.dll sentinel_processor\wavelet\fortran\wavelet_mod.f90
+gfortran -O2 -shared -o sentinel_processor\dl\fortran\libsentinel_normalize.dll sentinel_processor\dl\fortran\normalize_mod.f90
 ```
 
 After compiling on Windows, copy the MSYS2 runtime DLLs next to each `.dll`:
 
 ```bat
-for %d in (validation indices processing filters analysis texture wavelet) do (
+for %d in (validation indices processing filters analysis texture wavelet dl) do (
   copy C:\msys64\ucrt64\bin\libgfortran-5.dll    sentinel_processor\%d\fortran\
   copy C:\msys64\ucrt64\bin\libgcc_s_seh-1.dll   sentinel_processor\%d\fortran\
   copy C:\msys64\ucrt64\bin\libwinpthread-1.dll   sentinel_processor\%d\fortran\
@@ -516,6 +522,14 @@ sentinel_processor/
     ├── _wavelet_bridge.py
     └── fortran/
         └── wavelet_mod.f90
+└── dl/                             ← NEW
+    ├── __init__.py
+    ├── _normalize_bridge.py
+    ├── normalize.py
+    ├── presets.py
+    ├── tiling.py
+    └── fortran/
+        └── normalize_mod.f90
 
 tests/
 ├── conftest.py
@@ -530,6 +544,7 @@ tests/
 ├── test_timeseries_bridge.py
 ├── test_visualisation.py
 └── test_wavelet.py                 ← NEW
+└── test_dl.py                      ← NEW
 
 docs/
 ├── ANALYSIS.md
@@ -543,7 +558,8 @@ docs/
 ├── TIMESERIES.md
 ├── VALIDATION.md
 ├── VISUALISATION.md
-└── WAVELET.md                      ← NEW
+├── WAVELET.md                      ← NEW
+└── ML.md                           ← NEW
 ```
 
 ---
