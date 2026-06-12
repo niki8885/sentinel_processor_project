@@ -226,7 +226,6 @@ def compute_indices(
 
     if suffix in (".tif", ".tiff"):
         da = rioxarray.open_rasterio(source)
-        bands_dict = _load_bands_from_multiband(da, set())
         needed_all: set[BandKey] = set()
         for idx_name in indices:
             needed_all |= set(_INDEX_REGISTRY[idx_name]["bands"])

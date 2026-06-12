@@ -845,6 +845,22 @@ class TestPhenologyMetrics:
         valid = (res0["sos_doy"] != NODATA) & (res20["sos_doy"] != NODATA)
         assert np.all(res0["sos_doy"][valid] <= res20["sos_doy"][valid] + 1e-6)
 
+    def test_smoothing_ignores_nodata_gaps(self):
+        """A cloud gap (NODATA) must not contaminate the S-G smoothed values.
+
+        Regression: NODATA (-9999) used to leak into the quadratic fit,
+        producing peak values in the hundreds for an NDVI-range series.
+        """
+        n = 12
+        dates = _dates(n)
+        vals = np.array([0.2, 0.3, 0.45, 0.6, 0.75, NODATA,
+                         0.85, 0.75, 0.6, 0.45, 0.3, 0.2])
+        stack = vals.reshape(n, 1, 1)
+        res = phenology_metrics(stack, dates, smooth=True, savgol_window=5)
+        peak = float(res["peak_val"][0, 0])
+        assert peak != NODATA
+        assert 0.5 < peak <= 1.0
+
 
 # save_phenology
 

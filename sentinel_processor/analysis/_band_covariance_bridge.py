@@ -144,6 +144,11 @@ def band_covariance(arr: np.ndarray) -> np.ndarray:
 
     Notes
     -----
+    Band means are computed over each band's own valid pixels, while
+    cross-products use only jointly valid pixels (pairwise deletion).
+    When validity masks differ strongly between bands the result may not
+    be positive semi-definite — check eigenvalues before inverting.
+
     Typical downstream use — PCA via eigendecomposition::
 
         cov = band_covariance(stack)               # (n_bands, n_bands)

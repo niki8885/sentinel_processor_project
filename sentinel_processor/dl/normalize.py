@@ -93,6 +93,13 @@ def normalize_for_dl(
     arr = np.asarray(arr, dtype=np.float64)
     original_shape = arr.shape
 
+    # The Fortran kernels recognise only NODATA (-9999); remap a custom
+    # sentinel onto it before the call and restore it in the output.
+    nodata_mask: np.ndarray | None = None
+    if nodata != NODATA:
+        nodata_mask = np.isclose(arr, nodata, atol=1e-3)
+        arr = np.where(nodata_mask, NODATA, arr)
+
     if arr.ndim == 1:
         arr_2d = arr[:, np.newaxis]
     elif arr.ndim == 2:
@@ -159,7 +166,10 @@ def normalize_for_dl(
                 float(bstats["std"]),
             )
 
-    return result.reshape(original_shape)
+    result = result.reshape(original_shape)
+    if nodata_mask is not None:
+        result[nodata_mask] = nodata
+    return result
 
 
 # Dataset statistics
@@ -225,9 +235,12 @@ def compute_dataset_stats(
                 )
                 continue
             flat = band_arrays[b].ravel().astype(np.float64)
+            if nodata != NODATA:
+                # Fortran band_stats recognises only NODATA (-9999)
+                flat = np.where(np.isclose(flat, nodata, atol=1e-3), NODATA, flat)
             s = _band_stats_fortran(flat)
             n_b = int(np.sum(
-                ~np.isclose(flat, nodata, atol=1e-3)
+                ~np.isclose(flat, NODATA, atol=1e-3)
             ))
             if n_b == 0:
                 continue

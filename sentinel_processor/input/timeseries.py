@@ -12,7 +12,6 @@ import xarray as xr
 
 from sentinel_processor.validation._fortran_bridge import (
     call_check_dimensions,
-    call_check_radiometry,
     call_validate_scl,
 )
 from sentinel_processor.processing._raster_ops_bridge import (
@@ -124,22 +123,17 @@ def _scl_metrics(scl_path: Path, max_cloud_threshold: float) -> dict:
         }
 
     flat_int = np.asarray(arr, dtype=np.int32).ravel()
-    flat_dbl = flat_int.astype(np.float64)
 
     scl_result = call_validate_scl(flat_int, max_cloud_threshold)
 
-    radio_pass = True
-    try:
-        radio_pass = call_check_radiometry(flat_dbl)
-    except Exception as exc:
-        logger.debug(f"[timeseries] Radiometry check error {scl_path.name}: {exc}")
-
+    # SCL class codes (0–11) carry no radiometric information; a saturation
+    # check is only meaningful on reflectance data (see sidecar reports).
     return {
         "cloud_fraction": scl_result["cloud_ratio"],
         "snow_fraction": scl_result["snow_ratio"],
         "confidence_score": scl_result["confidence_score"],
         "dimension_pass": True,
-        "radiometry_pass": radio_pass,
+        "radiometry_pass": True,
         "issues": scl_result["issues"],
     }
 
@@ -567,32 +561,36 @@ def stack_timeseries(
                 accepted_times.append(time_np)
             continue
 
+        def _reject_late(reason: str) -> None:
+            info.accepted = False
+            info.reject_reason = reason
+            if cfg.fill_rejected:
+                accepted_arrays.append(None)
+                accepted_times.append(time_np)
+
         # open and validate bands
         try:
             da = _clean(_open_scene(path))
         except Exception as exc:
             logger.warning(f"[timeseries] Cannot open {path}: {exc}")
-            info.accepted = False
-            info.reject_reason = f"read error: {exc}"
+            _reject_late(f"read error: {exc}")
             continue
 
         if canonical_required:
             scene_canonical = _resolve_bands(da)
             missing = [b for b in canonical_required if b not in scene_canonical]
             if missing:
-                info.accepted = False
-                info.reject_reason = f"missing bands: {missing}"
                 logger.warning(f"[timeseries] {path.name} — missing bands {missing}")
+                _reject_late(f"missing bands: {missing}")
                 continue
 
-        # align to reference gridd
+        # align to reference grid
         if cfg.align and path != ref_path:
             try:
                 da = _align_to_reference(da, ref_da)
             except Exception as exc:
                 logger.warning(f"[timeseries] Alignment failed {path.name}: {exc}")
-                info.accepted = False
-                info.reject_reason = f"alignment error: {exc}"
+                _reject_late(f"alignment error: {exc}")
                 continue
 
         accepted_arrays.append(da.astype(np.float32))

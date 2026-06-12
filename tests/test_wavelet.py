@@ -596,7 +596,6 @@ class TestDwt2dBatch:
 class TestDwt3d:
 
     def _cube(self, n_times=4, rows=16, cols=16, seed=0) -> np.ndarray:
-        # n_times=4: log2(4)=2, so default levels=2 in idwt3d matches dwt3d(levels=2)
         return np.random.default_rng(seed).random((n_times, rows, cols))
 
     def test_output_shape_equals_input(self):
@@ -628,35 +627,41 @@ class TestDwt3d:
     @pytest.mark.parametrize("wavelet", ["haar", "db4", "sym4"])
     def test_roundtrip(self, wavelet):
         # idwt3d(dwt3d(cube, levels=2)) must reconstruct cube to machine epsilon.
-        # n_times=4 → log2(4)=2 so idwt3d default levels matches.
         cube = self._cube()   # shape (4, 16, 16)
         c = dwt3d(cube, levels=2, wavelet=wavelet)
-        r = idwt3d(c,   wavelet=wavelet)
+        r = idwt3d(c,   wavelet=wavelet, levels=2)
+        np.testing.assert_allclose(r, cube, atol=1e-9)
+
+    def test_roundtrip_default_levels(self):
+        """idwt3d(dwt3d(cube)) with both defaults (levels=1) must round-trip."""
+        cube = self._cube(n_times=8)
+        c = dwt3d(cube, wavelet="haar")
+        r = idwt3d(c, wavelet="haar")
         np.testing.assert_allclose(r, cube, atol=1e-9)
 
     def test_roundtrip_shape(self):
         cube = self._cube()   # (4, 16, 16)
         c = dwt3d(cube, levels=2)
-        r = idwt3d(c)
+        r = idwt3d(c, levels=2)
         assert r.shape == cube.shape
 
     def test_roundtrip_dtype_float64(self):
         cube = self._cube()
         c = dwt3d(cube, levels=2)
-        r = idwt3d(c)
+        r = idwt3d(c, levels=2)
         assert r.dtype == np.float64
 
     def test_roundtrip_c_contiguous(self):
         cube = self._cube()
         c = dwt3d(cube, levels=2)
-        r = idwt3d(c)
+        r = idwt3d(c, levels=2)
         assert r.flags["C_CONTIGUOUS"]
 
     def test_temporal_energy_conserved_in_roundtrip(self):
         """idwt3d(dwt3d(cube)) must have the same total energy as cube (Parseval)."""
         cube = self._cube()   # (4, 16, 16)
         c    = dwt3d(cube, levels=2, wavelet="haar")
-        r    = idwt3d(c,   wavelet="haar")
+        r    = idwt3d(c,   wavelet="haar", levels=2)
         assert np.sum(r ** 2) == pytest.approx(np.sum(cube ** 2), rel=1e-6)
 
     def test_zeroing_temporal_hi_smooths_cube(self):

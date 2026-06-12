@@ -125,6 +125,23 @@ class TestNormalizeMinmax:
         out = normalize_for_dl(arr, method="minmax")
         assert out.shape == arr.shape
 
+    def test_custom_nodata_preserved(self):
+        """Pixels equal to a non-default nodata must be masked and preserved.
+
+        Regression: a custom nodata used to be stretched as ordinary data.
+        """
+        arr = np.array([[0.0, 5.0, 10.0, -1.0]])
+        out = normalize_for_dl(arr, method="minmax", nodata=-1.0)
+        assert out[0, 3] == pytest.approx(-1.0)
+        np.testing.assert_allclose(out[0, :3], [0.0, 0.5, 1.0])
+
+    def test_custom_nodata_zscore(self):
+        arr = np.array([[100.0, 200.0, 300.0, -1.0]])
+        stats = {"0": {"mean": 200.0, "std": 100.0}}
+        out = normalize_for_dl(arr, method="zscore", stats=stats, nodata=-1.0)
+        assert out[0, 3] == pytest.approx(-1.0)
+        np.testing.assert_allclose(out[0, :3], [-1.0, 0.0, 1.0])
+
 
 class TestNormalizeZscore:
     def test_scene_stats(self):

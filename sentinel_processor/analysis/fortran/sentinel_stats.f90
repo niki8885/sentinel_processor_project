@@ -1051,7 +1051,10 @@ contains
                     s3 = 0.0d0; s4 = 0.0d0
                     sy = 0.0d0; sxy = 0.0d0; sx2y = 0.0d0
                     do j = -half, half
-                        jj = t + j;  xj = real(j, c_double)
+                        jj = t + j
+                        ! NODATA observations must not contaminate the fit
+                        if (abs(tmp(jj) - NODATA) <= 1.0d-4) cycle
+                        xj = real(j, c_double)
                         s0 = s0 + 1.0d0
                         s1 = s1 + xj
                         s2 = s2 + xj * xj

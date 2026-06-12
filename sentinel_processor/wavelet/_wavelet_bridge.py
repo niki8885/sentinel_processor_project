@@ -488,11 +488,7 @@ def dwt2d_batch(
 
     Parameters
     ----------
-    stack   : (n_bands, rows, cols) or (rows, cols, n_bands) float64 array.
-              Assumed to be (n_bands, rows, cols) unless the first axis
-              size equals the last, in which case band-last is assumed
-              only if ndim==3 and shape[0] == shape[1] (ambiguous case
-              defaults to band-first).
+    stack   : (n_bands, rows, cols) float64 array (band-first).
     levels  : Decomposition depth.
     wavelet : Wavelet family.
 
@@ -646,7 +642,7 @@ def dwt3d(
 def idwt3d(
         coeffs: np.ndarray,
         wavelet: Wavelet = "haar",
-        levels: int | None = None,
+        levels: int = 1,
 ) -> np.ndarray:
     """
     Inverse separable 3-D DWT.
@@ -656,8 +652,9 @@ def idwt3d(
     coeffs  : (n_times, rows, cols) coefficient array from :func:`dwt3d`.
     wavelet : Must match the forward transform.
     levels  : Decomposition depth used in the forward :func:`dwt3d` call.
-              Defaults to ``int(log2(n_times))``; pass explicitly when
-              ``dwt3d`` was called with a different value.
+              Defaults to 1 — the same default as :func:`dwt3d`.  The flat
+              coefficient layout does not encode the depth, so always pass
+              the value that was used in the forward transform.
 
     Returns
     -------
@@ -671,8 +668,6 @@ def idwt3d(
     wav_flag = _validate_wavelet(wavelet)
 
     npix = rows * cols
-    if levels is None:
-        levels = int(np.log2(n_times))
     flat = np.empty(n_times * npix, dtype=np.float64)
     for t in range(n_times):
         flat[t * npix: (t + 1) * npix] = (
