@@ -508,3 +508,40 @@ class TestListFilters:
         for name, entry in list_filters().items():
             assert "default_params" in entry
             assert isinstance(entry["default_params"], dict)
+
+# apply_filter_da — xarray wrapper
+
+
+class TestApplyFilterDa:
+
+    def _da(self, rows=16, cols=16, with_crs=False):
+        xr = pytest.importorskip("xarray")
+        da = xr.DataArray(
+            np.random.default_rng(5).random((rows, cols)),
+            dims=["y", "x"],
+            coords={"y": np.arange(rows, dtype=float),
+                    "x": np.arange(cols, dtype=float)},
+            attrs={"source": "test"},
+        )
+        if with_crs:
+            import rioxarray  # noqa: F401
+            da = da.rio.write_crs("EPSG:32634")
+        return da
+
+    def test_returns_dataarray_same_shape(self):
+        from sentinel_processor.filters.compute import apply_filter_da
+        da = self._da()
+        out = apply_filter_da(da, "gaussian", sigma=1.0)
+        assert out.shape == da.shape
+        assert out.dims == da.dims
+
+    def test_attrs_record_filter_name(self):
+        from sentinel_processor.filters.compute import apply_filter_da
+        out = apply_filter_da(self._da(), "median", radius=1)
+        assert out.attrs["filter_applied"] == "median"
+        assert out.attrs["source"] == "test"
+
+    def test_crs_preserved(self):
+        from sentinel_processor.filters.compute import apply_filter_da
+        out = apply_filter_da(self._da(with_crs=True), "gaussian")
+        assert out.rio.crs is not None

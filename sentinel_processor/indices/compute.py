@@ -138,16 +138,18 @@ def _load_bands_from_multiband(
     da: xr.DataArray,
     needed: set[BandKey],
 ) -> dict[BandKey, np.ndarray] | None:
+    """Extract the requested bands; missing ones are simply absent from the
+    result so the caller can skip indices per band.  Returns None when no
+    requested band can be matched at all."""
     if "band" not in da.coords:
         return None
     coord_map = _resolve_band_coords(da)
-    if needed and not needed.issubset(coord_map.keys()):
+    keys = (needed & set(coord_map)) if needed else set(coord_map)
+    if not keys:
         return None
-    keys = needed if needed else set(coord_map.keys())
     return {
         key: da.sel(band=coord_map[key]).values.astype(np.float64)
         for key in keys
-        if key in coord_map
     }
 
 
@@ -163,9 +165,10 @@ def _load_bands_from_dataset(
             result[key] = ds[key].values.astype(np.float64)
         elif key.upper() in var_map:
             result[key] = ds[var_map[key.upper()]].values.astype(np.float64)
-        else:
-            return None
-    return result
+    # None = no named variable matched at all (lets the caller fall back to
+    # a 'band'-coordinate scan); a partial dict lets indices be skipped
+    # individually.
+    return result or None
 
 
 def _check_missing_bands(

@@ -308,3 +308,156 @@ class TestTileGridShape:
         n0, r0, c0 = tile_grid_shape(512, 512, 256, overlap=0)
         n1, r1, c1 = tile_grid_shape(512, 512, 256, overlap=64)
         assert n1 >= n0
+
+
+# compute_dataset_stats / _welford_combine / save & load stats
+
+
+def _write_stats_scene(tmp_path, name, offset=0.0, rows=16, cols=16):
+    """Write a NetCDF scene with B04/B08 variables; return its path."""
+    pytest.importorskip("netCDF4")
+    import xarray as xr
+
+    rng = np.random.default_rng(int(offset) + 3)
+    ds = xr.Dataset(
+        {
+            "B04": (("y", "x"), rng.uniform(100, 2000, (rows, cols)) + offset),
+            "B08": (("y", "x"), rng.uniform(500, 4000, (rows, cols)) + offset),
+        }
+    )
+    path = tmp_path / name
+    ds.to_netcdf(str(path))
+    ds.close()
+    return path
+
+
+class TestWelfordCombine:
+
+    def test_two_batches_match_global_stats(self):
+        from sentinel_processor.dl.normalize import _welford_combine
+
+        rng = np.random.default_rng(0)
+        a = rng.normal(100, 20, 1000)
+        b = rng.normal(300, 50, 500)
+
+        agg = {"n": 0, "mean": 0.0, "M2": 0.0,
+               "min": float("inf"), "max": float("-inf")}
+        for batch in (a, b):
+            _welford_combine(
+                agg, batch.size,
+                float(batch.mean()), float(batch.std()),
+                float(batch.min()), float(batch.max()),
+            )
+
+        full = np.concatenate([a, b])
+        assert agg["n"] == full.size
+        assert agg["mean"] == pytest.approx(full.mean())
+        assert math.sqrt(agg["M2"] / agg["n"]) == pytest.approx(full.std())
+        assert agg["min"] == pytest.approx(full.min())
+        assert agg["max"] == pytest.approx(full.max())
+
+
+class TestComputeDatasetStats:
+
+    def test_stats_across_scenes(self, tmp_path):
+        from sentinel_processor.dl.normalize import compute_dataset_stats
+
+        p1 = _write_stats_scene(tmp_path, "s_20260101T000000.nc", offset=0.0)
+        p2 = _write_stats_scene(tmp_path, "s_20260111T000000.nc", offset=500.0)
+        stats = compute_dataset_stats([p1, p2], ["B04", "B08"])
+
+        for b in ("B04", "B08"):
+            assert stats[b]["n_pixels"] == 2 * 16 * 16
+            assert stats[b]["std"] > 0
+            assert stats[b]["min"] <= stats[b]["mean"] <= stats[b]["max"]
+
+    def test_missing_band_yields_zero_pixels(self, tmp_path):
+        from sentinel_processor.dl.normalize import compute_dataset_stats
+
+        p1 = _write_stats_scene(tmp_path, "s_20260101T000000.nc")
+        stats = compute_dataset_stats([p1], ["B11"])
+        assert stats["B11"]["n_pixels"] == 0
+        assert stats["B11"]["std"] == 1.0
+
+    def test_unreadable_scene_skipped(self, tmp_path):
+        from sentinel_processor.dl.normalize import compute_dataset_stats
+
+        good = _write_stats_scene(tmp_path, "s_20260101T000000.nc")
+        bad = tmp_path / "broken.nc"
+        bad.write_bytes(b"not a netcdf file")
+        stats = compute_dataset_stats([bad, good], ["B04"])
+        assert stats["B04"]["n_pixels"] == 16 * 16
+
+    def test_unsupported_format_skipped(self, tmp_path):
+        from sentinel_processor.dl.normalize import compute_dataset_stats
+
+        txt = tmp_path / "scene.txt"
+        txt.write_text("nope")
+        stats = compute_dataset_stats([txt], ["B04"])
+        assert stats["B04"]["n_pixels"] == 0
+
+    def test_custom_nodata_excluded(self, tmp_path):
+        from sentinel_processor.dl.normalize import compute_dataset_stats
+        pytest.importorskip("netCDF4")
+        import xarray as xr
+
+        arr = np.full((8, 8), 1000.0)
+        arr[0, :4] = -1.0  # 4 nodata pixels under a custom sentinel
+        ds = xr.Dataset({"B04": (("y", "x"), arr)})
+        path = tmp_path / "s_20260101T000000.nc"
+        ds.to_netcdf(str(path))
+        ds.close()
+
+        stats = compute_dataset_stats([path], ["B04"], nodata=-1.0)
+        assert stats["B04"]["n_pixels"] == 60
+        assert stats["B04"]["mean"] == pytest.approx(1000.0)
+
+
+class TestStatsPersistence:
+
+    def test_save_load_roundtrip(self, tmp_path):
+        stats = {"B04": {"mean": 1.5, "std": 0.5}}
+        path = tmp_path / "stats.json"
+        save_stats(stats, path)
+        assert load_stats(path) == stats
+
+    def test_json_suffix_appended(self, tmp_path):
+        save_stats({"a": 1}, tmp_path / "stats")
+        assert (tmp_path / "stats.json").exists()
+
+    def test_parent_dirs_created(self, tmp_path):
+        save_stats({"a": 1}, tmp_path / "deep" / "dir" / "stats.json")
+        assert (tmp_path / "deep" / "dir" / "stats.json").exists()
+
+    def test_load_missing_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_stats(tmp_path / "absent.json")
+
+
+class TestNormalizeErrors:
+
+    def test_unknown_method_raises(self):
+        with pytest.raises(ValueError, match="Unknown normalisation method"):
+            normalize_for_dl(np.ones((2, 4, 4)), method="banana")
+
+    def test_4d_input_raises(self):
+        with pytest.raises(ValueError, match="1-D, 2-D, or 3-D"):
+            normalize_for_dl(np.ones((1, 2, 4, 4)), method="minmax")
+
+    def test_preset_without_bands_raises(self):
+        with pytest.raises(ValueError, match="'bands' must be provided"):
+            normalize_for_dl(np.ones((3, 4, 4)), method="sentinel2_rgb")
+
+    def test_preset_band_count_mismatch_raises(self):
+        with pytest.raises(ValueError, match="does not match"):
+            normalize_for_dl(
+                np.ones((2, 4, 4)), method="sentinel2_rgb",
+                bands=["B04", "B03", "B02"],
+            )
+
+    def test_preset_unknown_band_raises(self):
+        with pytest.raises(KeyError, match="not in preset"):
+            normalize_for_dl(
+                np.ones((3, 4, 4)), method="sentinel2_rgb",
+                bands=["B04", "B03", "B99"],
+            )

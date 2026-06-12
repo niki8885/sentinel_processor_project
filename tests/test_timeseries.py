@@ -725,3 +725,74 @@ class TestStackTimeseries:
         result.to_json(log_path)
         data = json.loads(log_path.read_text())
         assert len(data["scenes"]) == 2
+
+
+# _align_to_reference / _scl_metrics
+
+
+class TestAlignToReference:
+
+    def test_same_shape_returned_unchanged(self):
+        from sentinel_processor.input.timeseries import _align_to_reference
+        ref = _make_da(rows=32, cols=32)
+        da = _make_da(rows=32, cols=32)
+        assert _align_to_reference(da, ref) is da
+
+    def test_same_crs_resampled_to_reference_grid(self):
+        from sentinel_processor.input.timeseries import _align_to_reference
+        ref = _make_da(rows=64, cols=64)
+        da = _make_da(rows=32, cols=32)
+        out = _align_to_reference(da, ref)
+        assert out.shape[-2:] == (64, 64)
+        np.testing.assert_array_equal(out.coords["x"].values,
+                                      ref.coords["x"].values)
+
+
+class TestSclMetrics:
+
+    def _write_scl_tif(self, tmp_path, values):
+        pytest.importorskip("rasterio")
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        rows, cols = values.shape
+        path = tmp_path / "scl_scene_20260101T000000.tif"
+        with rasterio.open(
+                str(path), "w",
+                driver="GTiff", height=rows, width=cols, count=1,
+                dtype="int32", crs="EPSG:32634",
+                transform=from_bounds(0, 0, cols, rows, cols, rows),
+        ) as dst:
+            dst.write(values.astype(np.int32), 1)
+        return path
+
+    def test_clear_scene_metrics(self, tmp_path):
+        from sentinel_processor.input.timeseries import _scl_metrics
+        scl = np.full((64, 64), 4)  # all vegetation
+        path = self._write_scl_tif(tmp_path, scl)
+        m = _scl_metrics(path, max_cloud_threshold=0.3)
+        assert m["dimension_pass"] is True
+        assert m["cloud_fraction"] == pytest.approx(0.0)
+        assert m["confidence_score"] == pytest.approx(1.0)
+
+    def test_cloudy_scene_metrics(self, tmp_path):
+        from sentinel_processor.input.timeseries import _scl_metrics
+        scl = np.full((64, 64), 9)  # all high-probability cloud
+        path = self._write_scl_tif(tmp_path, scl)
+        m = _scl_metrics(path, max_cloud_threshold=0.3)
+        assert m["cloud_fraction"] == pytest.approx(1.0)
+        assert m["confidence_score"] == pytest.approx(0.0)
+
+    def test_tiny_scene_fails_dimension_check(self, tmp_path):
+        from sentinel_processor.input.timeseries import _scl_metrics
+        scl = np.full((8, 8), 4)  # below MIN_SIDE=32
+        path = self._write_scl_tif(tmp_path, scl)
+        m = _scl_metrics(path, max_cloud_threshold=0.3)
+        assert m["dimension_pass"] is False
+        assert m["confidence_score"] == 0.0
+
+    def test_unreadable_scl_passes_with_warning(self, tmp_path):
+        from sentinel_processor.input.timeseries import _scl_metrics
+        m = _scl_metrics(tmp_path / "missing.tif", max_cloud_threshold=0.3)
+        assert m["confidence_score"] == 1.0
+        assert "warning" in m

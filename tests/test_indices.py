@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -400,3 +402,163 @@ class TestComputeIndices:
             overwrite=False,
         )
         assert isinstance(result, dict)
+
+
+# compute_indices — NetCDF integration
+
+
+def _write_scene_nc(tmp_path, var_names=("B04", "B08"), rows=24, cols=24):
+    """Write a NetCDF dataset with named band variables; return its path."""
+    pytest.importorskip("netCDF4")
+    import xarray as xr
+
+    rng = np.random.default_rng(11)
+    xs = np.linspace(600000.0, 600000.0 + cols * 10.0, cols, endpoint=False)
+    ys = np.linspace(5200000.0, 5200000.0 - rows * 10.0, rows, endpoint=False)
+    ds = xr.Dataset(
+        {
+            name: xr.DataArray(
+                rng.uniform(100.0, 4000.0, (rows, cols)),
+                dims=["y", "x"],
+                coords={"y": ys, "x": xs},
+            )
+            for name in var_names
+        }
+    )
+    path = tmp_path / "scene_20260101T000000.nc"
+    ds.to_netcdf(str(path))
+    ds.close()
+    return path
+
+
+class TestComputeIndicesValidation:
+
+    def test_missing_source_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            compute_indices(str(tmp_path / "nope.nc"), ["ndvi"])
+
+    def test_empty_indices_raises(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        with pytest.raises(ValueError, match="must not be empty"):
+            compute_indices(str(src), [])
+
+    def test_unknown_index_raises(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        with pytest.raises(ValueError, match="Unknown index"):
+            compute_indices(str(src), ["nope"])
+
+    def test_bad_output_format_raises(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        with pytest.raises(ValueError, match="output_format"):
+            compute_indices(str(src), ["ndvi"], output_format="png")
+
+    def test_unsupported_suffix_raises(self, tmp_path):
+        bad = tmp_path / "scene.txt"
+        bad.write_text("not a raster")
+        with pytest.raises(ValueError, match="Unsupported file format"):
+            compute_indices(str(bad), ["ndvi"])
+
+
+class TestComputeIndicesNetCDF:
+
+    def test_ndvi_written_as_nc(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        out_dir = tmp_path / "out"
+        result = compute_indices(
+            str(src), ["ndvi"], output_dir=str(out_dir), output_format="nc",
+        )
+        assert "ndvi" in result
+        assert Path(result["ndvi"]).exists()
+        assert Path(result["ndvi"]).suffix == ".nc"
+
+    def test_ndvi_written_as_tif(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        out_dir = tmp_path / "out"
+        result = compute_indices(
+            str(src), ["ndvi"], output_dir=str(out_dir), output_format="tif",
+        )
+        assert "ndvi" in result
+        assert Path(result["ndvi"]).suffix == ".tif"
+
+    def test_ndvi_values_in_valid_range(self, tmp_path):
+        import xarray as xr
+        src = _write_scene_nc(tmp_path)
+        result = compute_indices(
+            str(src), ["ndvi"], output_dir=str(tmp_path / "out"),
+            output_format="nc",
+        )
+        with xr.open_dataarray(result["ndvi"]) as da:
+            vals = da.values
+        valid = vals[np.abs(vals - (-9999.0)) > 1.0]
+        assert np.all(valid >= -1.0 - 1e-6)
+        assert np.all(valid <= 1.0 + 1e-6)
+
+    def test_missing_band_index_skipped(self, tmp_path):
+        # mndwi needs B11 which the scene lacks; ndvi is still computed
+        src = _write_scene_nc(tmp_path)
+        result = compute_indices(
+            str(src), ["ndvi", "mndwi"], output_dir=str(tmp_path / "out"),
+        )
+        assert "ndvi" in result
+        assert "mndwi" not in result
+
+    def test_all_bands_missing_returns_empty(self, tmp_path):
+        src = _write_scene_nc(tmp_path, var_names=("B04",))
+        result = compute_indices(
+            str(src), ["mndwi"], output_dir=str(tmp_path / "out"),
+        )
+        assert result == {}
+
+    def test_scale_factor_applied(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        result = compute_indices(
+            str(src), ["ndvi"], output_dir=str(tmp_path / "out"),
+            scale_factor=1e-4,
+        )
+        assert "ndvi" in result
+
+    def test_default_output_dir_next_to_source(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        result = compute_indices(str(src), ["ndvi"])
+        assert Path(result["ndvi"]).parent == tmp_path / "indices"
+
+    def test_multiple_indices_one_call(self, tmp_path):
+        src = _write_scene_nc(tmp_path, var_names=("B03", "B04", "B08"))
+        result = compute_indices(
+            str(src), ["ndvi", "savi", "ndwi"], output_dir=str(tmp_path / "out"),
+        )
+        assert set(result) == {"ndvi", "savi", "ndwi"}
+
+    def test_overwrite_false_keeps_existing(self, tmp_path):
+        src = _write_scene_nc(tmp_path)
+        out_dir = tmp_path / "out"
+        first = compute_indices(str(src), ["ndvi"], output_dir=str(out_dir))
+        mtime = Path(first["ndvi"]).stat().st_mtime_ns
+        second = compute_indices(
+            str(src), ["ndvi"], output_dir=str(out_dir), overwrite=False,
+        )
+        assert Path(second["ndvi"]).stat().st_mtime_ns == mtime
+
+
+class TestComputeIndicesTifWithoutBandNames:
+
+    def test_unnamed_bands_return_empty(self, tmp_path):
+        # Plain GeoTIFF band indices (1..N) cannot be matched to B04/B08
+        pytest.importorskip("rasterio")
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        rows, cols = 24, 24
+        tif = tmp_path / "plain.tif"
+        with rasterio.open(
+                str(tif), "w",
+                driver="GTiff", height=rows, width=cols, count=2,
+                dtype="float32", crs="EPSG:4326",
+                transform=from_bounds(0, 0, 1, 1, cols, rows),
+        ) as dst:
+            dst.write(np.ones((2, rows, cols), dtype=np.float32))
+
+        result = compute_indices(
+            str(tif), ["ndvi"], output_dir=str(tmp_path / "out"),
+        )
+        assert result == {}

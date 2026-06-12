@@ -5,9 +5,11 @@ Sentinel-2 L2A downloader and processing toolkit built on the [Element84 STAC AP
 Downloads spectral bands, quality layers, and visual overviews for any coordinate. Validation, spectral index computation, convolution filters, pansharpening, wavelet denoising, time-series stacking, and band covariance are all backed by compiled Fortran kernels — Python handles I/O and orchestration, Fortran handles the pixels.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z01TOFUW)
+
 [![PyPI](https://img.shields.io/pypi/v/sentinel-processor)](https://pypi.org/project/sentinel-processor/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://pypi.org/project/sentinel-processor/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE.md)
+[![codecov](https://codecov.io/gh/niki8885/sentinel_processor_project/graph/badge.svg?token=HOA72EZTGA)](https://codecov.io/gh/niki8885/sentinel_processor_project)
 
 ---
 
