@@ -13,6 +13,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .coverage
+coverage.xml
+junit.xml
 
 .env
 .env.local

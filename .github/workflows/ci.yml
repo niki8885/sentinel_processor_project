@@ -85,6 +85,8 @@ jobs:
           --cov=sentinel_processor
           --cov-report=xml
           --cov-report=term-missing
+          --junitxml=junit.xml
+          -o junit_family=legacy
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
@@ -93,6 +95,14 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
           fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: junit.xml
+          flags: py${{ matrix.python-version }}
 
   # ── Lint ──────────────────────────────────────────────────────────────────
   lint:
