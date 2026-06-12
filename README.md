@@ -10,6 +10,9 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://pypi.org/project/sentinel-processor/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE.md)
 [![codecov](https://codecov.io/gh/niki8885/sentinel_processor_project/graph/badge.svg?token=HOA72EZTGA)](https://codecov.io/gh/niki8885/sentinel_processor_project)
+[![Kaggle](https://img.shields.io/badge/Kaggle-live%20demo-20BEFF?logo=kaggle&logoColor=white)](https://www.kaggle.com/code/nikitamanaenkov/sentinel-processor-package-demo)
+
+> **Try it live:** the full package walkthrough — download, indices, filters, time series, phenology, DL preprocessing — runs end-to-end in this [Kaggle demo notebook](https://www.kaggle.com/code/nikitamanaenkov/sentinel-processor-package-demo).
 
 ---
 
