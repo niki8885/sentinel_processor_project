@@ -7,7 +7,7 @@ Downloads spectral bands, quality layers, and visual overviews for any coordinat
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z01TOFUW)
 
 [![PyPI](https://img.shields.io/pypi/v/sentinel-processor)](https://pypi.org/project/sentinel-processor/)
-[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://pypi.org/project/sentinel-processor/)
+[![Python](https://img.shields.io/badge/python-3.11%20|%203.12-blue)](https://pypi.org/project/sentinel-processor/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE.md)
 [![codecov](https://codecov.io/gh/niki8885/sentinel_processor_project/graph/badge.svg?token=HOA72EZTGA)](https://codecov.io/gh/niki8885/sentinel_processor_project)
 [![Kaggle](https://img.shields.io/badge/Kaggle-live%20demo-20BEFF?logo=kaggle&logoColor=white)](https://www.kaggle.com/code/nikitamanaenkov/sentinel-processor-package-demo)
@@ -590,7 +590,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for full contribution guidelines.
 
 ## Requirements
 
-- Python ≥ 3.10
+- Python ≥ 3.11
 - `pystac-client`, `rioxarray`, `xarray`, `numpy`, `rasterio`, `plotly`
 - `netCDF4` or `h5netcdf` for `.nc` output (optional)
 - `gfortran` ≥ 9 to build the Fortran kernels

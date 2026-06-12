@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, temporal statistics, band covariance, wavelet denoising, DL normalisation / tiling, and Plotly visualisation"
 readme = "README.md"
 license = {file = "LICENSE.md"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 keywords = [
     "sentinel-2", "remote-sensing", "satellite", "stac",
@@ -21,7 +21,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: GIS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
