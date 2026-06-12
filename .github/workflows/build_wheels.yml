@@ -69,40 +69,24 @@ jobs:
             PIP_ONLY_BINARY="rasterio:pyproj:numpy:shapely:GDAL"
           CIBW_REPAIR_WHEEL_COMMAND_MACOS: "delocate-wheel -w {dest_dir} -v {wheel}"
 
-          CIBW_TEST_COMMAND_LINUX: >-
-            bash -c "pip install --only-binary :all: rasterio pyproj rioxarray &&
-            python -c \"
-            import sentinel_processor
-            from sentinel_processor.indices.compute    import list_indices
-            from sentinel_processor.filters.compute    import list_filters
-            from sentinel_processor.analysis._sentinel_stats_bridge   import NODATA
-            from sentinel_processor.analysis._band_covariance_bridge  import band_covariance
-            from sentinel_processor.texture             import compute_glcm
-            from sentinel_processor.wavelet._wavelet_bridge import dwt2d, idwt2d, bayes_denoise
-            from sentinel_processor.dl.normalize import normalize_for_dl
-            from sentinel_processor.dl.tiling   import extract_tiles, stitch_tiles
-            from sentinel_processor.dl.presets  import get_preset
-            print(sorted(list_indices()))
-            print(sorted(list_filters()))
-            print('ALL OK')
-            \""
+          # NOTE: must stay a single line of ';'-separated statements —
+          # YAML '>-' folding joins lines with spaces, which breaks a
+          # multi-line Python script passed to `python -c`.
           CIBW_TEST_COMMAND: >-
-            python -c "
-            import sentinel_processor
-            from sentinel_processor.indices.compute    import list_indices
-            from sentinel_processor.filters.compute    import list_filters
-            from sentinel_processor.analysis._sentinel_stats_bridge   import NODATA
-            from sentinel_processor.analysis._band_covariance_bridge  import band_covariance
-            from sentinel_processor.texture             import compute_glcm
-            from sentinel_processor.wavelet._wavelet_bridge import dwt2d, idwt2d, bayes_denoise
-            from sentinel_processor.dl.normalize import normalize_for_dl
-            from sentinel_processor.dl.tiling   import extract_tiles, stitch_tiles
-            from sentinel_processor.dl.presets  import get_preset
-            print('Indices:', sorted(list_indices()))
-            print('Filters:', sorted(list_filters()))
-            print('Analysis NODATA:', NODATA)
-            print('ALL OK')
-            "
+            python -c "import sentinel_processor;
+            from sentinel_processor.indices.compute import list_indices;
+            from sentinel_processor.filters.compute import list_filters;
+            from sentinel_processor.analysis._sentinel_stats_bridge import NODATA;
+            from sentinel_processor.analysis._band_covariance_bridge import band_covariance;
+            from sentinel_processor.texture import compute_glcm;
+            from sentinel_processor.wavelet._wavelet_bridge import dwt2d, idwt2d, bayes_denoise;
+            from sentinel_processor.dl.normalize import normalize_for_dl;
+            from sentinel_processor.dl.tiling import extract_tiles, stitch_tiles;
+            from sentinel_processor.dl.presets import get_preset;
+            print('Indices:', sorted(list_indices()));
+            print('Filters:', sorted(list_filters()));
+            print('Analysis NODATA:', NODATA);
+            print('ALL OK')"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
