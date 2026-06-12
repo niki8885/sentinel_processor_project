@@ -354,7 +354,6 @@ class StackResult:
         list[str]
             Absolute paths of written files.
         """
-        import os
 
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)

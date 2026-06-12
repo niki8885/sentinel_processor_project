@@ -12,7 +12,6 @@ from sentinel_processor.dl._normalize_bridge import (
 )
 from sentinel_processor.dl.presets import (
     AVAILABLE_PRESETS,
-    PRESET_REGISTRY,
     get_preset,
 )
 
@@ -192,15 +191,13 @@ def compute_dataset_stats(
     dict  –  ``{"B04": {"mean": ..., "std": ..., "min": ..., "max": ...}, ...}``
     """
     try:
-        import rioxarray
-        import xarray as xr
+        import rioxarray  # noqa: F401  — availability check
+        import xarray as xr  # noqa: F401  — availability check
     except ImportError as exc:
         raise ImportError(
             "rioxarray and xarray are required for compute_dataset_stats. "
             "Install them with: pip install rioxarray xarray"
         ) from exc
-
-    from sentinel_processor.indices.compute import _BAND_ALIASES
 
     bands = list(bands)
 
@@ -293,7 +290,6 @@ def _load_bands_for_stats(
     import rioxarray
     import xarray as xr
     from sentinel_processor.indices.compute import (
-        _BAND_ALIASES,
         _load_bands_from_multiband,
         _load_bands_from_dataset,
     )

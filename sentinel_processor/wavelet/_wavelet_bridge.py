@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes
 import sys
 from pathlib import Path
-from typing import Dict, List, Literal
+from typing import Literal
 import numpy as np
 
 _LIB_NAME = (

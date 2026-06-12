@@ -3,9 +3,12 @@ import ctypes
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TypedDict, Optional
+from typing import TYPE_CHECKING, Any, TypedDict
 import logging
 import numpy as np
+
+if TYPE_CHECKING:
+    import xarray as xr
 
 _LIB_NAME = (
     "libsentinel_stats.dll" if sys.platform == "win32"
@@ -799,7 +802,6 @@ def save_phenology(
     """
     try:
         import rasterio
-        from rasterio.transform import from_origin
     except ImportError as exc:
         raise ImportError(
             "rasterio is required for save_phenology. "

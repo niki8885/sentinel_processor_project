@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 from sentinel_processor.input.downloader import DownloadConfig, download_sentinel2
 from sentinel_processor.utils.data_utils import (

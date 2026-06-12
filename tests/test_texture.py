@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys
 import types
 import warnings
-from unittest.mock import patch
+from contextlib import contextmanager
 import numpy as np
 import pytest
 
@@ -357,7 +357,6 @@ class TestComputeGlcmAngles:
 
     def test_distance_affects_output(self):
         band = _make_band(40, 40, seed=24)
-        border_1 = 7 // 2 + 1
         border_2 = 7 // 2 + 2
 
         f1 = _call(band, window=7, distance=1, angle=-1)
@@ -526,9 +525,6 @@ class TestTextureBridge:
 
 
 # small context-manager used by bridge shape/angle tests
-from contextlib import contextmanager
-
-
 @contextmanager
 def monkeypatch_lib_path(bridge_module):
     import pathlib

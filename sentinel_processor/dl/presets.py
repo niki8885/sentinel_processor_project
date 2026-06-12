@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Sequence
 
 SSL4EO_S12_ALL: dict[str, dict[str, float]] = {
     "B02": {"mean": 1605.57, "std": 1390.58},

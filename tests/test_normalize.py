@@ -1,5 +1,4 @@
 from __future__ import annotations
-import json
 import math
 import sys
 import tempfile
@@ -23,7 +22,6 @@ from sentinel_processor.dl.normalize import (
     normalize_for_dl,
     save_stats,
     load_stats,
-    AVAILABLE_METHODS,
 )
 from sentinel_processor.dl.tiling import (
     extract_tiles,

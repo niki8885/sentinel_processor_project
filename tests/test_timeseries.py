@@ -614,7 +614,8 @@ class TestStackTimeseries:
         """Write named-band .nc files for require_bands tests.
         Separate helper because _make_scene_files uses .tif (no named coords).
         """
-        import xarray as xr, rioxarray  # noqa: F401
+        import xarray as xr
+        import rioxarray  # noqa: F401
         if band_names is None:
             band_names = ["red", "nir"]
         timestamps = ["20260520T094746", "20260523T094726"][:n]

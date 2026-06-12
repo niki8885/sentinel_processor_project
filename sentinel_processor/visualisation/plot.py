@@ -336,7 +336,6 @@ def _nearest_pixel_value(
     Handles projected CRS by reprojecting the query point first;
     falls back to direct coordinate selection otherwise.
     """
-    import xarray as xr
 
     crs = None
     try:

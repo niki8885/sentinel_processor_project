@@ -1,10 +1,6 @@
 from __future__ import annotations
-import ctypes
-import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import numpy as np
 import pytest
 
@@ -720,9 +716,9 @@ class TestPearsonMap:
         a = np.full((n, 1, 1), NODATA, dtype=np.float64)
         b = np.full((n, 1, 1), NODATA, dtype=np.float64)
         # only 2 valid joint steps
-        a[0, 0, 0] = 0.3;
+        a[0, 0, 0] = 0.3
         b[0, 0, 0] = 0.4
-        a[1, 0, 0] = 0.5;
+        a[1, 0, 0] = 0.5
         b[1, 0, 0] = 0.6
         r = pearson_map(a, b, dates)
         assert r[0, 0] == NODATA

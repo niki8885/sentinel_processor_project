@@ -20,7 +20,6 @@ ALL_METHODS = list(_METHOD_MAP.keys())
 
 def _ramp(n_times=10, rows=4, cols=4, seed=0):
     """Linear ramp along time axis, all pixels identical."""
-    rng = np.random.default_rng(seed)
     base = np.linspace(100.0, 900.0, n_times)
     arr = np.broadcast_to(base[:, None, None], (n_times, rows, cols)).copy()
     return arr.astype(np.float64)

@@ -1,7 +1,6 @@
 from __future__ import annotations
-from typing import Literal
 import numpy as np
-from ._texture_bridge import NODATA, Angle
+from ._texture_bridge import NODATA
 
 __all__ = ["compute_glcm", "NODATA"]
 
@@ -35,21 +34,21 @@ def _glcm_numpy(
     c_lo, c_hi = max(c0 - half_w, 0), min(c0 + half_w + 1, cols)
 
     patch_i = qlev[r_lo:r_hi, c_lo:c_hi]
-    r1_lo = r_lo + dr;
+    r1_lo = r_lo + dr
     r1_hi = r_hi + dr
-    c1_lo = c_lo + dc;
+    c1_lo = c_lo + dc
     c1_hi = c_hi + dc
 
     # Clip neighbour patch to valid raster extent
-    pr_lo = max(r1_lo, 0);
+    pr_lo = max(r1_lo, 0)
     pr_hi = min(r1_hi, rows)
-    pc_lo = max(c1_lo, 0);
+    pc_lo = max(c1_lo, 0)
     pc_hi = min(c1_hi, cols)
 
     # Matching offsets in patch_i
-    pi_r_lo = pr_lo - r1_lo;
+    pi_r_lo = pr_lo - r1_lo
     pi_r_hi = pr_hi - r1_lo
-    pi_c_lo = pc_lo - c1_lo;
+    pi_c_lo = pc_lo - c1_lo
     pi_c_hi = pc_hi - c1_lo
 
     patch_j = qlev[pr_lo:pr_hi, pc_lo:pc_hi]
