@@ -36,7 +36,6 @@ from sentinel_processor.config import (  # noqa: E402
     STAC_API_URL,
 )
 from sentinel_processor.validation._fortran_bridge import (  # noqa: E402
-    call_check_radiometry,
     call_check_dimensions,
     call_validate_scl,
 )
@@ -318,17 +317,11 @@ def _run_validation(
     scl_result = call_validate_scl(scl_np, cfg.max_cloud_threshold)
     report.update(scl_result)
 
-    radio_pass = True
-    try:
-        radio_pass = call_check_radiometry(scl_np.astype(np.float64, copy=False))
-    except Exception as exc:
-        logger.warning(
-            f"[validation] Radiometry check failed for {item.id}: {exc}"
-        )
-        report["radiometry_error"] = str(exc)
-
-    report["radiometry_pass"] = radio_pass
-    passes = scl_result["confidence_score"] >= cfg.min_confidence and radio_pass
+    # Radiometry (saturation) cannot be judged from the SCL classification
+    # layer (values 0–11); it requires actual reflectance data which is not
+    # downloaded at validation time.
+    report["radiometry_pass"] = True
+    passes = scl_result["confidence_score"] >= cfg.min_confidence
     report["passed"] = passes
     return passes, report, clipped
 
@@ -601,16 +594,22 @@ def _download_item(
 
         # Visual
         if cfg.visual:
-            def _fetch_visual(vis_key: str, href: str) -> list[str]:
-                da = rioxarray.open_rasterio(href, lock=False)
-                vis = _clip(da, lon, lat, half)
-                return _save_both(vis, cfg.subdir("visual"), f"vis_{base_name}")
-
             vis_tasks = {
                 vis_key: item.assets[vis_key].href
                 for vis_key in list(VisualAssets.VISUAL)
                 if vis_key in item.assets
             }
+
+            def _fetch_visual(vis_key: str, href: str) -> list[str]:
+                da = rioxarray.open_rasterio(href, lock=False)
+                vis = _clip(da, lon, lat, half)
+                # Suffix with the asset key when several visual assets exist,
+                # otherwise they would overwrite each other.
+                base = (
+                    f"vis_{base_name}" if len(vis_tasks) == 1
+                    else f"vis_{vis_key}_{base_name}"
+                )
+                return _save_both(vis, cfg.subdir("visual"), base)
             vis_futures = {
                 pool.submit(_fetch_visual, k, h): k
                 for k, h in vis_tasks.items()

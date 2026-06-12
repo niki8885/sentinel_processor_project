@@ -4,6 +4,7 @@ venv/
 env/
 downloads/
 data/
+analysis_output/
 
 __pycache__/
 *.py[cod]
@@ -12,6 +13,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .coverage
+coverage.xml
+junit.xml
 
 .env
 .env.local
@@ -26,3 +29,6 @@ __pycache__/
 build/
 dist/
 pFUnit/
+
+# Logs
+*.json

@@ -4,19 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentinel-processor"
-version = "0.1.1"
-description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, and Plotly visualisation"
+version = "0.2.0"
+description = "Sentinel-2 L2A downloader with STAC, Fortran-backed validation, spectral indices, temporal statistics, band covariance, wavelet denoising, DL normalisation / tiling, and Plotly visualisation"
 readme = "README.md"
 license = {file = "LICENSE.md"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
-keywords = ["sentinel-2", "remote-sensing", "satellite", "stac", "rasterio", "plotly"]
+keywords = [
+    "sentinel-2", "remote-sensing", "satellite", "stac",
+    "rasterio", "plotly", "time-series", "phenology",
+    "pca", "covariance", "wavelet", "denoising",
+    "deep-learning", "normalisation", "tiling",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: GIS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -59,15 +63,31 @@ sentinel_processor = [
     "indices/fortran/*.f90",
     "processing/fortran/*.f90",
     "filters/fortran/*.f90",
-    # Compiled libraries — included when present (wheels build them in setup.py)
+    "analysis/fortran/*.f90",
+    "texture/fortran/*.f90",
+    "wavelet/fortran/*.f90",
+    "dl/fortran/*.f90",
+
+    # Compiled libraries — included when present (built in setup.py)
     "validation/fortran/*.so",
     "validation/fortran/*.dll",
     "indices/fortran/*.so",
     "indices/fortran/*.dll",
     "processing/fortran/*.so",
     "processing/fortran/*.dll",
+    "processing/fortran/libsentinel_timeseries*.so",
+    "processing/fortran/libsentinel_timeseries*.dll",
     "filters/fortran/*.so",
     "filters/fortran/*.dll",
+    "analysis/fortran/*.so",
+    "analysis/fortran/*.dll",
+    "texture/fortran/*.so",
+    "texture/fortran/*.dll",
+    "wavelet/fortran/*.so",
+    "wavelet/fortran/*.dll",
+    "dl/fortran/*.so",
+    "dl/fortran/*.dll",
+
     # MSYS2 runtime DLLs bundled on Windows
     "validation/fortran/libgfortran*.dll",
     "validation/fortran/libgcc*.dll",
@@ -81,6 +101,18 @@ sentinel_processor = [
     "filters/fortran/libgfortran*.dll",
     "filters/fortran/libgcc*.dll",
     "filters/fortran/libwinpthread*.dll",
+    "analysis/fortran/libgfortran*.dll",
+    "analysis/fortran/libgcc*.dll",
+    "analysis/fortran/libwinpthread*.dll",
+    "texture/fortran/libgfortran*.dll",
+    "texture/fortran/libgcc*.dll",
+    "texture/fortran/libwinpthread*.dll",
+    "wavelet/fortran/libgfortran*.dll",
+    "wavelet/fortran/libgcc*.dll",
+    "wavelet/fortran/libwinpthread*.dll",
+    "dl/fortran/libgfortran*.dll",
+    "dl/fortran/libgcc*.dll",
+    "dl/fortran/libwinpthread*.dll",
 ]
 
 [tool.pytest.ini_options]

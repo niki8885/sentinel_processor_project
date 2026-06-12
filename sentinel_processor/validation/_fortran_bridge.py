@@ -175,16 +175,13 @@ def validate_file(
     scl_np = np.asarray(da.values, dtype=np.int32).ravel()
     scl_result = call_validate_scl(scl_np, max_cloud_threshold)
 
-    radio_pass = True
-    try:
-        radio_pass = call_check_radiometry(scl_np.astype(np.float64, copy=False))
-    except Exception as exc:
-        scl_result["radiometry_error"] = str(exc)
-
-    passed = scl_result["confidence_score"] >= min_confidence and radio_pass
+    # SCL class codes (0–11) carry no radiometric information, so the
+    # saturation check is not applicable here; run call_check_radiometry
+    # on a reflectance band to test radiometry.
+    passed = scl_result["confidence_score"] >= min_confidence
     return {
         "file": scl_path,
         **scl_result,
-        "radiometry_pass": radio_pass,
+        "radiometry_pass": True,
         "passed": passed,
     }

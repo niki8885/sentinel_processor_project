@@ -29,17 +29,21 @@ sentinel_processor/
 ├── __init__.py
 ├── config.py
 ├── input/
-│   └── downloader.py
+│   ├── downloader.py
+│   └── timeseries.py
 ├── utils/
 │   └── data_utils.py
 ├── processing/
 │   ├── _fortran_bridge.py       ← pansharpening bridge
 │   ├── _raster_ops_bridge.py    ← raster ops bridge
+│   ├── _timeseries_bridge.py    ← gap-filling bridge
 │   └── fortran/
 │       ├── pansharpening.f90
 │       ├── raster_ops.f90
+│       ├── timeseries_mod.f90
 │       ├── libsentinel_processing.dll / .so
-│       └── libsentinel_raster_ops.dll / .so
+│       ├── libsentinel_raster_ops.dll / .so
+│       └── libsentinel_timeseries.dll / .so
 └── validation/
     ├── _fortran_bridge.py
     └── fortran/
@@ -162,6 +166,7 @@ See [VALIDATION.md](VALIDATION.md) for validation thresholds and Fortran routine
 | SCL cloud/snow validation | — | `validate_scl` (Fortran) |
 | Dimension check | — | `check_dimensions` (Fortran) |
 | Radiometry check | — | `check_radiometry` (Fortran) |
+| Time-series gap filling | `scipy.interpolate` / manual loops | `interpolate_gaps` (Fortran, 5 methods) |
 
 All Fortran paths have NumPy/rioxarray fallbacks — if a library is not compiled
 the downloader continues to work correctly, only slower.
